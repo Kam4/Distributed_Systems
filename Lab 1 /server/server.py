@@ -124,19 +124,19 @@ try:
 	    
         print "the delete option is ", delete_option
         
-        if(delete_option == 0):
+        if(int(delete_option) == 0):
         	modify_element_in_store(element_id, entry, False)
-        elif(delete_option == 1):
+        elif(int(delete_option) == 1):
         	delete_element_from_store(element_id, False)
         
         #propage to other nodes
         thread = Thread(target=propagate_to_vessels,
-                            args=('/propagate/DELETEorMODIFY/' + str(element_id), {'entry': entry}, 'POST'))
+                            args=('/propagate/DELETEorMODIFY/' + str(element_id), {'entry': entry, "delete": delete_option}, 'POST'))
         thread.daemon = True
         thread.start()
 
     #With this function you handle requests from other nodes like add modify or delete
-    @app.post('/propagate/<action>/<element_id>')
+    @app.post('/propagate/<action>/<element_id:int>')
     def propagation_received(action, element_id):
 	    #get entry from http body
         entry = request.forms.get('entry')
@@ -148,10 +148,11 @@ try:
 
         if(action == "DELETEorMODIFY"):
         	delete_option = request.forms.get("delete")
-        	if(delete_option == 0):
+        	print(":",type(delete_option),":")
+        	if(int(delete_option) == 0):
         		modify_element_in_store(element_id, entry, True)
         		return
-        	if(delete_option == 1):
+        	if(int(delete_option) == 1):
         		delete_element_from_store(element_id)
         		return
 
@@ -202,8 +203,6 @@ try:
     # ------------------------------------------------------------------------------------------------------
     def main():
         global vessel_list, node_id, app
-
-      	element_id = 1
 
         port = 80
         parser = argparse.ArgumentParser(description='Your own implementation of the distributed blackboard')
