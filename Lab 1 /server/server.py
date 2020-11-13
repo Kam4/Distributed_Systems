@@ -21,7 +21,7 @@ try:
     # board stores all message on the system
     board = {0: "Welcome to Distributed Systems Course"}
 
-    global_id = 0
+    global_id = 1
 
     # ------------------------------------------------------------------------------------------------------
     # BOARD FUNCTIONS
@@ -31,7 +31,7 @@ try:
     # This functions will add an new element
 
     def add_new_element_to_store(entry_sequence, element, is_propagated_call=False):
-        global board, node_id
+        global board, node_id, global_id
         success = False
         try:
             if entry_sequence not in board:
@@ -72,7 +72,7 @@ try:
     def index():
         global board, node_id
         return template('server/index.tpl', board_title='Vessel {}'.format(node_id),
-                        board_dict=sorted({"0": board, }.iteritems()), members_name_string='YOUR NAME')
+                        board_dict=sorted({"0": board, }.iteritems()), members_name_string='Andreas Månsson, Kamil Mudy and Tulathorn Sripongpankul')
 
     @app.get('/board')
     def get_board():
@@ -92,6 +92,7 @@ try:
             new_entry = request.forms.get('entry')
 
             element_id = global_id
+            #element_id = len(board)
 
             add_new_element_to_store(element_id, new_entry)
 
@@ -145,7 +146,7 @@ try:
         print "the action is", action
 
         if(action == "ADD"):
-            add_new_element_to_store(element_id, entry)
+            add_new_element_to_store(global_id, entry)
             return
 
         if(action == "DELETEorMODIFY"):
