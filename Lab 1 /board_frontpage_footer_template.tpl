@@ -1,5 +1,5 @@
 <footer>
-  <p>Group members: {{members_name_string}}</p>
+  <p>Group members: {{Andreas Månsson, Kamil Mudy and Tulathorn Sripongpankul}}</p>
 </footer>
 </body>
 </html>
