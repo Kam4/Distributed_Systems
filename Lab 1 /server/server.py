@@ -21,6 +21,7 @@ try:
     # board stores all message on the system
     board = {0: "Welcome to Distributed Systems Course"}
 
+    #Globa_id for elements so that each element gets a unique ID
     global_id = 1
 
     # ------------------------------------------------------------------------------------------------------
@@ -30,6 +31,7 @@ try:
 
     # This functions will add an new element
 
+    
     def add_new_element_to_store(entry_sequence, element, is_propagated_call=False):
         global board, node_id, global_id
         success = False
@@ -39,9 +41,11 @@ try:
                 success = True
         except Exception as e:
             print e
+        #For each new entry increment global ID
         global_id += 1
         return success
 
+    #Modify Entry in the board
     def modify_element_in_store(entry_sequence, modified_element, is_propagated_call=False):
         global board, node_id
         success = False
@@ -51,7 +55,8 @@ try:
         except Exception as e:
             print e
         return success
-
+    
+    #Delete Entry in the board
     def delete_element_from_store(entry_sequence, is_propagated_call=False):
         global board, node_id
         success = False
@@ -91,9 +96,8 @@ try:
         try:
             new_entry = request.forms.get('entry')
 
+            
             element_id = global_id
-            #element_id = len(board)
-
             add_new_element_to_store(element_id, new_entry)
 
             # you should propagate something
@@ -123,10 +127,10 @@ try:
         entry = request.forms.get('entry')
 
         delete_option = request.forms.get('delete')
-        # 0 = modify, 1 = delete
 
         print "the delete option is ", delete_option
-
+       
+        # 0 = modify, 1 = delete
         if(int(delete_option) == 0):
             modify_element_in_store(element_id, entry, False)
         elif(int(delete_option) == 1):
@@ -145,6 +149,8 @@ try:
         entry = request.forms.get('entry')
         print "the action is", action
 
+        
+        #Check request type
         if(action == "ADD"):
             add_new_element_to_store(global_id, entry)
             return
@@ -158,16 +164,6 @@ try:
             if(int(delete_option) == 1):
                 delete_element_from_store(element_id)
                 return
-
-        # Handle requests
-        # for example action == "ADD":
-        #add_new_element_to_store(element_id, entry, True)
-
-        # Modify the board entry
-        #modify_element_in_store(element_id, entry, True)
-
-        # Delete the entry from the board
-        #delete_element_from_store(element_id, True)
 
     # ------------------------------------------------------------------------------------------------------
     # DISTRIBUTED COMMUNICATIONS FUNCTIONS
