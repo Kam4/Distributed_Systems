@@ -88,7 +88,7 @@ try:
     # No need to modify this
     @app.route('/')
     def index():
-        global board, node_id
+        global board, node_id, has_coordinator
 
         if(not has_coordinator):
         	print("No coordinator.. Starting election for {}!".format(node_id))
@@ -180,7 +180,6 @@ try:
 
         if(action == "DELETEorMODIFY"):
             delete_option = request.forms.get("delete")
-            print(":", type(delete_option), ":")
             if(int(delete_option) == 0):
                 modify_element_in_store(element_id, entry, True)
                 return
@@ -193,11 +192,11 @@ try:
     '''
     @app.post('/election/<process:int>')
     def election_received(process):
-    	global vessel_list, node_id
-    	print("/election/<process:int>")
-    	if(process < node_id):
+    	global vessel_list, node_id, ongoing_election
+    	if(process < node_id and not ongoing_election):
+    		print("/election/<process:int>/")
     		ongoing_election = True
-    		contact_vessel(vessel_list[process][1], "/election/answer")
+    		contact_vessel(vessel_list[str(process)], "/election/answer")
     		thread = Thread(target=send_election_to_vessels,
                         args=('/election/{}'.format(node_id), {}, "POST"))
     		thread.daemon = True
@@ -207,14 +206,16 @@ try:
    	'''
    	Answer if someone else has a higher process id, we are not leader and accept our fate.
    	'''
-    @app.post('election/answer')
+    @app.post('/election/answer')
     def contested_election():
-    	print("election/answer")
+    	global ongoing_election
+    	print("election/answer called")
     	ongoing_election = False
     	return
 
-    @app.post('election/new_leader/<process:int>')
+    @app.post('/election/new_leader/<process:int>')
     def new_leader(process):
+    	global has_coordinator, coordinator_id
     	print("election/new_leader/<process:int>")
     	has_coordinator = True
     	coordinator_id = process
@@ -258,23 +259,27 @@ try:
     	print("send_election_to_vessels()")
 
     	for vessel_id, vessel_ip in vessel_list.items():
-    		if vessel_id > node_id:
+    		if int(vessel_id) > node_id:
     			success = contact_vessel(vessel_ip, path, payload, req)
     			if not success:
     				print "\n\nCould not contact vessel {}\n\n".format(vessel_id)
-    	wait_for_leader_result(time.time()*1000)
+    	wait_for_leader_result(time.time())
 
    	# ------------------------------------------------------------------------------------------------------
     # Helper functions
     # ------------------------------------------------------------------------------------------------------
 
     def wait_for_leader_result(time_request):
-    	global node_id, ongoing_election
+    	global node_id, ongoing_election, has_coordinator, coordinator_id, is_coordinator
 
-    	time_needed = 1000
-    	while(ongoing_election or time.time()*1000 - time_request < time_needed):
+    	time_needed = 1
+    	time_now = time.time()
+    	print("wait_for_leader_result")
+    	while(ongoing_election and time_now - time_request < time_needed):
     		print("Waiting for takeover...")
-    		time.sleep(100)
+    		time_now = time.time()
+    		time.sleep(0.1)
+    	print("Ongoing election {}".format(ongoing_election))
     	if(ongoing_election):
     		# we won we are the leaders
     		is_coordinator = True
@@ -282,7 +287,7 @@ try:
     		coordinator_id = node_id
     		ongoing_election = False
     		print("I AM NOW THE LEADER, I  AM Joe Biden nr.{}".format(node_id))
-    		propagate_to_vessels("election/new_leader/{}".format(node_id))
+    		propagate_to_vessels("/election/new_leader/{}".format(node_id))
     	else:
     		# we lost, we are drone.
     		print("WE LOST BOIOIIS")
@@ -308,7 +313,6 @@ try:
         # We need to write the other vessels IP, based on the knowledge of their number
         for i in range(1, args.nbv+1):
             vessel_list[str(i)] = '10.1.0.{}'.format(str(i))
-
         try:
             run(app, host=vessel_list[str(node_id)], port=port)
         except Exception as e:
