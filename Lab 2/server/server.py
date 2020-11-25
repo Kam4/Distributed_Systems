@@ -26,7 +26,6 @@ try:
 
     has_leader = False
     ongoing_election = False
-    voted = False
     leader_id = 0
 
 
@@ -87,15 +86,10 @@ try:
     	
     	if(not has_leader):
         	print("No leader.. Starting election for {}!".format(node_id))
-    		thread_start = Thread(target=propagate_to_vessels,
-                    args=('/election/start_election', {"process_id": node_id}, "POST"))
+    		thread_start = Thread(target=send_election_to_vessels,
+                    args=('/election/start_election_and_request', {"process_id": node_id}, "POST"))
     		thread_start.daemon = True
         	thread_start.start()
-
-        	thread_run = Thread(target=send_election_to_vessels,
-        		args=('/election/request_election', {"process_id": node_id}, "POST"))
-        	thread_run.daemon = True
-        	thread_run.start()
 
     		print("Election started!")
 
@@ -191,42 +185,41 @@ try:
 
     @app.post('/election/<action>')
     def election(action):
-    	global has_leader, ongoing_election, voted, node_id, leader_id
+    	global has_leader, ongoing_election, node_id, leader_id
 
     	process_id = request.forms.get("process_id")
 
+    	if(action == "start_election_and_request"):
+			ongoing_election = True
+			print("Got a start election notice, sending my election requests out!")
+			thread = Thread(target=send_election_to_vessels,
+				args=("/election/request_election", {}, "POST"))
+			thread.daemon = True	
+			thread.start()
 
-		has_leader = False
-		ongoing_election = True
-		voted = False
+			#Thread to keep track of time
+			thread_time = Thread(target=time_to_results,
+				args=())
+			thread_time.daemon = True
+			thread_time.start()
+			return
 
 
     	if(action == "request_election" and ongoing_election):
     		if(process_id < node_id):
-    			print("Election Request")
+    			print("Got election request, I am bigger, sending response!")
     			contact_vessel(vessel_list[process_id], "/election/response_election")
-    			if(not voted):
-	    			thread = Thread(target=send_election_to_vessels,
-	    				args=("/election/response_election", {}, "POST"))
-	    			thread.daemon = True	
-	    			thread.start()
-	    			voted = True
-
-	    			#Thread to keep track of time
-	    			thread_time = Thread(target=time_to_results,
-	    				args=(time.time()))
-	    			thread_time.daemon = True
-	    			thread_time.start()
-	    			return
 	    		return
 	    	return
 
     	if(action == "response_election"):
+    		print("Received response in election, I am not leader.")
     		ongoing_election = False
     		return
 
 
     	if(action == "election_result"):
+    		print("Got a new leader!")
     		ongoing_election = False
     		has_leader = True
     		leader_id = process_id
@@ -283,17 +276,24 @@ try:
     				print "\n\nCould not contact vessel {}\n\n".format(vessel_id)
     	
 
-    def time_to_results(time_voted):
+    # ------------------------------------------------------------------------------------------------------
+    # HELPER FUNCTIONS
+    # ------------------------------------------------------------------------------------------------------
+
+    def time_to_results():
 		global node_id, ongoing_election, has_leader, ongoing_election, leader_id
 
+		time_voted = time.time()
 		buffer_time = 1
 		time_now = time.time()
 
-		while time_now - time_voted < buffer_time:
+		while(time_now - time_voted < buffer_time):
 			print("Waiting for time to be end")
+			time_now = time.time()
 			time.sleep(0.2)
 
 		if(ongoing_election):
+			print("I won the election, propagating this information!")
 			propagate_to_vessels("/election/election_result", {"process_id":node_id}, "POST")
 			has_leader = True
 			ongoing_election = False
