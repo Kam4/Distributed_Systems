@@ -109,37 +109,37 @@ try:
     # ------------------------------------------------------------------------------------------------------
 
     # You NEED to change the follow functions
-    @app.post('/board')
-    def client_add_received():
-        '''Adds a new element to the board
-        Called directly when a user is doing a POST request on /board'''
-        global board, node_id
-        try:
-            new_entry = request.forms.get('entry')
+    # @app.post('/board')
+    # def client_add_received():
+    #     '''Adds a new element to the board
+    #     Called directly when a user is doing a POST request on /board'''
+    #     global board, node_id
+    #     try:
+    #         new_entry = request.forms.get('entry')
 
             
-            element_id = global_id
-            add_new_element_to_store(element_id, new_entry)
+    #         element_id = global_id
+    #         add_new_element_to_store(element_id, new_entry)
 
-            # you should propagate something
-            # Please use threads to avoid blocking
-            # thread = Thread(target=???,args=???)
-            # For example: thread = Thread(target=propagate_to_vessels, args=....)
-            # you should create the thread as a deamon with thread.daemon = True
-            # then call thread.start() to spawn the thread
+    #         # you should propagate something
+    #         # Please use threads to avoid blocking
+    #         # thread = Thread(target=???,args=???)
+    #         # For example: thread = Thread(target=propagate_to_vessels, args=....)
+    #         # you should create the thread as a deamon with thread.daemon = True
+    #         # then call thread.start() to spawn the thread
 
-            # Propagate action to all other nodes example :
-            thread = Thread(target=propagate_to_vessels,
-                            args=('/propagate/ADD/' + str(element_id), {'entry': new_entry}, 'POST'))
-            thread.daemon = True
-            thread.start()
-            return True
-        except Exception as e:
-            print e
-        return False
+    #         # Propagate action to all other nodes example :
+    #         thread = Thread(target=propagate_to_vessels,
+    #                         args=('/propagate/ADD/' + str(element_id), {'entry': new_entry}, 'POST'))
+    #         thread.daemon = True
+    #         thread.start()
+    #         return True
+    #     except Exception as e:
+    #         print e
+    #     return False
 
     # Post new value to corrdinator node: New board implement to meet the centerlized algorithms 
-    @app.post('/newboard')
+    @app.post('/board')
     def post_to_coordinator():
         global board, node_id, has_leader, leader_id
         try:
@@ -160,9 +160,36 @@ try:
             print e
         return False
 
+    # Old one
+    # @app.post('/board/<element_id:int>/')
+    # def client_action_received(element_id):
+    #     global board, node_id
+
+    #     print "You receive an element"
+    #     print "id is ", node_id
+    #     # Get the entry from the HTTP body
+    #     entry = request.forms.get('entry')
+
+    #     delete_option = request.forms.get('delete')
+
+    #     print "the delete option is ", delete_option
+       
+    #     # 0 = modify, 1 = delete
+    #     if(int(delete_option) == 0):
+    #         modify_element_in_store(element_id, entry, False)
+    #     elif(int(delete_option) == 1):
+    #         delete_element_from_store(element_id, False)
+
+    #     # propage to other nodes
+    #     thread = Thread(target=propagate_to_vessels,
+    #                     args=('/propagate/DELETEorMODIFY/' + str(element_id), {'entry': entry, "delete": delete_option}, 'POST'))
+    #     thread.daemon = True
+    #     thread.start()
+    
+    # New modify and delete function that point to the correct node 
     @app.post('/board/<element_id:int>/')
     def client_action_received(element_id):
-        global board, node_id
+        global board, node_id, leader_id
 
         print "You receive an element"
         print "id is ", node_id
@@ -172,16 +199,10 @@ try:
         delete_option = request.forms.get('delete')
 
         print "the delete option is ", delete_option
-       
-        # 0 = modify, 1 = delete
-        if(int(delete_option) == 0):
-            modify_element_in_store(element_id, entry, False)
-        elif(int(delete_option) == 1):
-            delete_element_from_store(element_id, False)
 
         # propage to other nodes
-        thread = Thread(target=propagate_to_vessels,
-                        args=('/propagate/DELETEorMODIFY/' + str(element_id), {'entry': entry, "delete": delete_option}, 'POST'))
+        thread = Thread(target=contact_vessel,
+                        args=(leader_id,'/propagate/DELETEorMODIFY/' + str(element_id), {'entry': entry, "delete": delete_option}, 'POST'))
         thread.daemon = True
         thread.start()
 
