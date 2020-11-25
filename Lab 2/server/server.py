@@ -138,6 +138,28 @@ try:
             print e
         return False
 
+    # Post new value to corrdinator node: New board implement to meet the centerlized algorithms 
+    @app.post('/newboard')
+    def post_to_coordinator():
+        global board, node_id, has_leader, leader_id
+        try:
+            new_entry = request.forms.get('entry')
+            element_id = global_id
+
+            if (not has_leader):
+                print ("starrt election again")
+
+            else:
+                # Propagate action to coordinator node :
+                thread = Thread(target=contact_vessel,
+                                args=(leader_id,'/propagate/ADD/' + str(element_id), {'entry': new_entry}, 'POST'))
+                thread.daemon = True
+                thread.start()
+            return True
+        except Exception as e:
+            print e
+        return False
+
     @app.post('/board/<element_id:int>/')
     def client_action_received(element_id):
         global board, node_id
@@ -186,6 +208,7 @@ try:
                 delete_element_from_store(element_id)
                 return
 
+    # New propagate function to handle all request from other node here.
 
     @app.post('/election/<action>')
     def election(action):
