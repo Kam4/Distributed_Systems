@@ -90,6 +90,10 @@ try:
                     args=('/election/start_election_and_request', {"process_id": node_id}, "POST"))
     		thread_start.daemon = True
         	thread_start.start()
+        	thread_time = Thread(target=time_to_results,
+					args=())
+        	thread_time.daemon = True
+        	thread_time.start()
 
     		print("Election started!")
 
@@ -185,15 +189,20 @@ try:
 
     @app.post('/election/<action>')
     def election(action):
-    	global has_leader, ongoing_election, node_id, leader_id
+    	global vessel_list, has_leader, ongoing_election, node_id, leader_id
 
     	process_id = request.forms.get("process_id")
 
+    	print("Got a request from node: {} and I am node: {}".format(process_id, node_id))
+
     	if(action == "start_election_and_request"):
+			if(int(process_id) < int(node_id)):
+				print("Got election request from {}, I am bigger, sending response!".format(process_id))
+				contact_vessel(vessel_list[process_id],  "/election/response_election", {"process_id": node_id})
 			ongoing_election = True
 			print("Got a start election notice, sending my election requests out!")
 			thread = Thread(target=send_election_to_vessels,
-				args=("/election/request_election", {}, "POST"))
+				args=("/election/request_election", {"process_id": node_id}, "POST"))
 			thread.daemon = True	
 			thread.start()
 
@@ -205,10 +214,10 @@ try:
 			return
 
 
-    	if(action == "request_election" and ongoing_election):
-    		if(process_id < node_id):
-    			print("Got election request, I am bigger, sending response!")
-    			contact_vessel(vessel_list[process_id], "/election/response_election")
+    	if(action == "request_election"):
+    		if(int(process_id) < int(node_id)):
+    			print("Got election request, I am bigger, sending response! -- ")
+    			contact_vessel(vessel_list[process_id], "/election/response_election", {"process_id": node_id})
 	    		return
 	    	return
 
@@ -222,7 +231,7 @@ try:
     		print("Got a new leader!")
     		ongoing_election = False
     		has_leader = True
-    		leader_id = process_id
+    		leader_id = int(process_id)
     		return
 
     	return
