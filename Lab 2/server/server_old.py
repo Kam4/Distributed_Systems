@@ -24,12 +24,17 @@ try:
     #Globa_id for elements so that each element gets a unique ID
     global_id = 1
 
-    has_leader = False
+    #role variable, True = coordinator/leader, False = consumer/follower
+    is_coordinator = False
+
+    #Does coordinator exist
+    has_coordinator = False
+
+    #Coordinator process id
+    coordinator_id = 0
+
+    #election ongoing
     ongoing_election = False
-    voted = False
-    leader_id = 0
-
-
 
 
     # ------------------------------------------------------------------------------------------------------
@@ -83,20 +88,15 @@ try:
     # No need to modify this
     @app.route('/')
     def index():
-    	global board, node_id, has_leader
-    	
-    	if(not has_leader):
-        	print("No leader.. Starting election for {}!".format(node_id))
-    		thread_start = Thread(target=propagate_to_vessels,
-                    args=('/election/start_election', {"process_id": node_id}, "POST"))
-    		thread_start.daemon = True
-        	thread_start.start()
+        global board, node_id, has_coordinator
 
-        	thread_run = Thread(target=send_election_to_vessels,
-        		args=('/election/request_election', {"process_id": node_id}, "POST"))
-        	thread_run.daemon = True
-        	thread_run.start()
-
+        if(not has_coordinator):
+        	print("No coordinator.. Starting election for {}!".format(node_id))
+    		ongoing_election = True
+    		thread = Thread(target=send_election_to_vessels,
+                    args=('/election/{}'.format(node_id), {}, "POST"))
+    		thread.daemon = True
+        	thread.start()
     		print("Election started!")
 
         return template('server/index.tpl', board_title='Vessel {}'.format(node_id),
@@ -117,25 +117,25 @@ try:
         Called directly when a user is doing a POST request on /board'''
         global board, node_id
         try:
-            new_entry = request.forms.get('entry')
+			new_entry = request.forms.get('entry')
 
-            
-            element_id = global_id
-            add_new_element_to_store(element_id, new_entry)
 
-            # you should propagate something
-            # Please use threads to avoid blocking
-            # thread = Thread(target=???,args=???)
-            # For example: thread = Thread(target=propagate_to_vessels, args=....)
-            # you should create the thread as a deamon with thread.daemon = True
-            # then call thread.start() to spawn the thread
+			element_id = global_id
+			add_new_element_to_store(element_id, new_entry)
 
-            # Propagate action to all other nodes example :
-            thread = Thread(target=propagate_to_vessels,
-                            args=('/propagate/ADD/' + str(element_id), {'entry': new_entry}, 'POST'))
-            thread.daemon = True
-            thread.start()
-            return True
+			# you should propagate something
+			# Please use threads to avoid blocking
+			# thread = Thread(target=???,args=???)
+			# For example: thread = Thread(target=propagate_to_vessels, args=....)
+			# you should create the thread as a deamon with thread.daemon = True
+			# then call thread.start() to spawn the thread
+
+			# Propagate action to all other nodes example :
+			thread = Thread(target=propagate_to_vessels,
+			                args=('/propagate/ADD/' + str(element_id), {'entry': new_entry}, 'POST'))
+			thread.daemon = True
+			thread.start()
+			return True
         except Exception as e:
             print e
         return False
@@ -180,7 +180,6 @@ try:
 
         if(action == "DELETEorMODIFY"):
             delete_option = request.forms.get("delete")
-            print(":", type(delete_option), ":")
             if(int(delete_option) == 0):
                 modify_element_in_store(element_id, entry, True)
                 return
@@ -188,55 +187,41 @@ try:
                 delete_element_from_store(element_id)
                 return
 
-
-    @app.post('/election/<action>')
-    def election(action):
-    	global has_leader, ongoing_election, voted, node_id, leader_id
-
-    	process_id = request.forms.get("process_id")
-
-
-		has_leader = False
-		ongoing_election = True
-		voted = False
-
-
-    	if(action == "request_election" and ongoing_election):
-    		if(process_id < node_id):
-    			print("Election Request")
-    			contact_vessel(vessel_list[process_id], "/election/response_election")
-    			if(not voted):
-	    			thread = Thread(target=send_election_to_vessels,
-	    				args=("/election/response_election", {}, "POST"))
-	    			thread.daemon = True	
-	    			thread.start()
-	    			voted = True
-
-	    			#Thread to keep track of time
-	    			thread_time = Thread(target=time_to_results,
-	    				args=(time.time()))
-	    			thread_time.daemon = True
-	    			thread_time.start()
-	    			return
-	    		return
-	    	return
-
-    	if(action == "response_election"):
-    		ongoing_election = False
-    		return
+    '''
+    Here we need to handle the election request.
+    '''
+    @app.post('/election/<process:int>')
+    def election_received(process):
+    	global vessel_list, node_id, ongoing_election, has_coordinator
+    	if(process < node_id):
+    		print("/election/<process:int>/")
+    		contact_vessel(vessel_list[str(process)], "/election/answer")
+    		if(not ongoing_election and not has_coordinator):
+    			ongoing_election = True
+	    		thread = Thread(target=send_election_to_vessels,
+	                        args=('/election/{}'.format(node_id), {}, "POST"))
+	    		thread.daemon = True
+	        	thread.start()
 
 
-    	if(action == "election_result"):
-    		ongoing_election = False
-    		has_leader = True
-    		leader_id = process_id
-    		return
-
+   	'''
+   	Answer if someone else has a higher process id, we are not leader and accept our fate.
+   	'''
+    @app.post('/election/answer')
+    def contested_election():
+    	global ongoing_election
+    	print("election/answer called")
+    	ongoing_election = False
     	return
 
-
-
-
+    @app.post('/election/new_leader/<process:int>')
+    def new_leader(process):
+    	global has_coordinator, coordinator_id, ongoing_election
+    	print("election/new_leader/<process:int>")
+    	has_coordinator = True
+    	ongoing_election = False
+    	coordinator_id = process
+    	return
 
     # ------------------------------------------------------------------------------------------------------
     # DISTRIBUTED COMMUNICATIONS FUNCTIONS
@@ -270,7 +255,6 @@ try:
                 if not success:
                     print "\n\nCould not contact vessel {}\n\n".format(vessel_id)
 
-
     def send_election_to_vessels(path, payload=None, req="POST"):
     	global vessel_list, node_id
 
@@ -281,24 +265,39 @@ try:
     			success = contact_vessel(vessel_ip, path, payload, req)
     			if not success:
     				print "\n\nCould not contact vessel {}\n\n".format(vessel_id)
-    	
+    	wait_for_leader_result(time.time())
 
-    def time_to_results(time_voted):
-		global node_id, ongoing_election, has_leader, ongoing_election, leader_id
+   	# ------------------------------------------------------------------------------------------------------
+    # Helper functions
+    # ------------------------------------------------------------------------------------------------------
 
-		buffer_time = 1
-		time_now = time.time()
+    def wait_for_leader_result(time_request):
+    	global node_id, ongoing_election, has_coordinator, coordinator_id, is_coordinator
 
-		while time_now - time_voted < buffer_time:
-			print("Waiting for time to be end")
-			time.sleep(0.2)
 
-		if(ongoing_election):
-			propagate_to_vessels("/election/election_result", {"process_id":node_id}, "POST")
-			has_leader = True
-			ongoing_election = False
-			leader_id = node_id
+    	if(has_coordinator and ongoing_election):
+    		return
 
+    	time_needed = 0.5
+    	time_now = time.time()
+    	print("wait_for_leader_result")
+    	while(ongoing_election and time_now - time_request < time_needed):
+    		print("Waiting for takeover...")
+    		time_now = time.time()
+    		time.sleep(0.01)
+    	print("Ongoing election {}".format(ongoing_election))
+    	if(ongoing_election and not has_coordinator):
+    		# we won we are the leaders
+    		is_coordinator = True
+    		has_coordinator = True
+    		coordinator_id = node_id
+       		print("I AM NOW THE LEADER, I  AM Joe Biden nr.{}".format(node_id))
+    		propagate_to_vessels("/election/new_leader/{}".format(node_id))
+    		ongoing_election = False
+    	else:
+    		# we lost, we are drone.
+    		print("WE LOST BOIOIIS")
+    		return
 
     # ------------------------------------------------------------------------------------------------------
     # EXECUTION
@@ -320,7 +319,6 @@ try:
         # We need to write the other vessels IP, based on the knowledge of their number
         for i in range(1, args.nbv+1):
             vessel_list[str(i)] = '10.1.0.{}'.format(str(i))
-
         try:
             run(app, host=vessel_list[str(node_id)], port=port)
         except Exception as e:
