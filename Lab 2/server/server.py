@@ -293,7 +293,7 @@ try:
 		global node_id, ongoing_election, has_leader, ongoing_election, leader_id
 
 		time_voted = time.time()
-		buffer_time = 1
+		buffer_time = 2
 		time_now = time.time()
 
 		while(time_now - time_voted < buffer_time):
