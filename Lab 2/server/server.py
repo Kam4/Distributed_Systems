@@ -11,6 +11,7 @@ import time
 import json
 import argparse
 from threading import Thread
+from collections import deque
 
 from bottle import Bottle, run, request, template
 import requests
@@ -28,7 +29,7 @@ try:
     ongoing_election = False
     leader_id = 0
 
-
+    queue = deque()
 
 
     # ------------------------------------------------------------------------------------------------------
@@ -108,88 +109,38 @@ try:
 
     # ------------------------------------------------------------------------------------------------------
 
-    # You NEED to change the follow functions
-    # @app.post('/board')
-    # def client_add_received():
-    #     '''Adds a new element to the board
-    #     Called directly when a user is doing a POST request on /board'''
-    #     global board, node_id
-    #     try:
-    #         new_entry = request.forms.get('entry')
-
-            
-    #         element_id = global_id
-    #         add_new_element_to_store(element_id, new_entry)
-
-    #         # you should propagate something
-    #         # Please use threads to avoid blocking
-    #         # thread = Thread(target=???,args=???)
-    #         # For example: thread = Thread(target=propagate_to_vessels, args=....)
-    #         # you should create the thread as a deamon with thread.daemon = True
-    #         # then call thread.start() to spawn the thread
-
-    #         # Propagate action to all other nodes example :
-    #         thread = Thread(target=propagate_to_vessels,
-    #                         args=('/propagate/ADD/' + str(element_id), {'entry': new_entry}, 'POST'))
-    #         thread.daemon = True
-    #         thread.start()
-    #         return True
-    #     except Exception as e:
-    #         print e
-    #     return False
-
-    # Post new value to corrdinator node: New board implement to meet the centerlized algorithms 
     @app.post('/board')
-    def post_to_coordinator():
-        global board, node_id, has_leader, leader_id
+    def client_add_received():
+        '''Adds a new element to the board
+        Called directly when a user is doing a POST request on /board'''
+        global board, node_id
         try:
             new_entry = request.forms.get('entry')
+
+            
             element_id = global_id
+            add_new_element_to_store(element_id, new_entry)
 
-            if (not has_leader):
-                print ("starrt election again")
+            # you should propagate something
+            # Please use threads to avoid blocking
+            # thread = Thread(target=???,args=???)
+            # For example: thread = Thread(target=propagate_to_vessels, args=....)
+            # you should create the thread as a deamon with thread.daemon = True
+            # then call thread.start() to spawn the thread
 
-            else:
-                # Propagate action to coordinator node :
-                thread = Thread(target=contact_vessel,
-                                args=(leader_id,'/propagate/ADD/' + str(element_id), {'entry': new_entry}, 'POST'))
-                thread.daemon = True
-                thread.start()
+            # Propagate action to all other nodes example :
+            thread = Thread(target=propagate_to_vessels,
+                            args=('/propagate/ADD/' + str(element_id), {'entry': new_entry}, 'POST'))
+            thread.daemon = True
+            thread.start()
             return True
         except Exception as e:
             print e
         return False
 
-    # Old one
-    # @app.post('/board/<element_id:int>/')
-    # def client_action_received(element_id):
-    #     global board, node_id
-
-    #     print "You receive an element"
-    #     print "id is ", node_id
-    #     # Get the entry from the HTTP body
-    #     entry = request.forms.get('entry')
-
-    #     delete_option = request.forms.get('delete')
-
-    #     print "the delete option is ", delete_option
-       
-    #     # 0 = modify, 1 = delete
-    #     if(int(delete_option) == 0):
-    #         modify_element_in_store(element_id, entry, False)
-    #     elif(int(delete_option) == 1):
-    #         delete_element_from_store(element_id, False)
-
-    #     # propage to other nodes
-    #     thread = Thread(target=propagate_to_vessels,
-    #                     args=('/propagate/DELETEorMODIFY/' + str(element_id), {'entry': entry, "delete": delete_option}, 'POST'))
-    #     thread.daemon = True
-    #     thread.start()
-    
-    # New modify and delete function that point to the correct node 
     @app.post('/board/<element_id:int>/')
     def client_action_received(element_id):
-        global board, node_id, leader_id
+        global board, node_id
 
         print "You receive an element"
         print "id is ", node_id
@@ -199,10 +150,16 @@ try:
         delete_option = request.forms.get('delete')
 
         print "the delete option is ", delete_option
+       
+        # 0 = modify, 1 = delete
+        if(int(delete_option) == 0):
+            modify_element_in_store(element_id, entry, False)
+        elif(int(delete_option) == 1):
+            delete_element_from_store(element_id, False)
 
         # propage to other nodes
-        thread = Thread(target=contact_vessel,
-                        args=(leader_id,'/propagate/DELETEorMODIFY/' + str(element_id), {'entry': entry, "delete": delete_option}, 'POST'))
+        thread = Thread(target=propagate_to_vessels,
+                        args=('/propagate/DELETEorMODIFY/' + str(element_id), {'entry': entry, "delete": delete_option}, 'POST'))
         thread.daemon = True
         thread.start()
 
@@ -327,6 +284,25 @@ try:
     			success = contact_vessel(vessel_ip, path, payload, req)
     			if not success:
     				print "\n\nCould not contact vessel {}\n\n".format(vessel_id)
+
+    def contact_leader(path, payload=None, req="POST"):
+    	global vessel_list, leader_id
+    	success = False
+        try:
+            if 'POST' in req:
+                res = requests.post(
+                    'http://{}{}'.format(vessel_list[leader_id], path), data=payload)
+            elif 'GET' in req:
+                res = requests.get('http://{}{}'.format(vessel_list[leader_id], path))
+            else:
+                print 'Non implemented feature!'
+            # result is in res.text or res.json()
+            print(res.text)
+            if res.status_code == 200:
+                success = True
+        except Exception as e:
+            print e
+        return success
     	
 
     # ------------------------------------------------------------------------------------------------------
@@ -351,7 +327,15 @@ try:
 			has_leader = True
 			ongoing_election = False
 			leader_id = node_id
+		return	
 
+	def add_to_queue(process_id = None, payload = None):
+		global queue, leader_id, node_id
+		if(leader_id == node_id and process_id):
+			queue.append(process_id)
+		elif(leader_id != node_id and payload):
+			queue.append(payload)
+		return
 
     # ------------------------------------------------------------------------------------------------------
     # EXECUTION
