@@ -47,9 +47,8 @@ try:
 		success = False
 		print("GLOBAL ID: ",global_id)
 		if(not is_propagated_call):
-			print("Increasing!!")
 			increase_global_id()
-			print("GLOBAL ID: ",global_id)
+			entry_sequence = global_id
 		try:
 			if entry_sequence not in board:
 				board[entry_sequence] = element
@@ -385,8 +384,8 @@ try:
 		print(queue)
 
 	def handle_resource_lock():
-		global locked, vessel_list, queue, leader_id, leader_queue, global_id
-		while(True):
+		global locked, vessel_list, queue, leader_id, leader_queue, global_id, node_id
+		while(leader_id == node_id):
 			if(not locked and len(queue) > 0):
 				locked = True
 				process_id = queue[0]
@@ -400,8 +399,9 @@ try:
 					thread_propagate.daemon = True
 					thread_propagate.start()
 					locked = False
-					return
-				contact_vessel(vessel_list[str(process_id)], "/access_granted", {}, "POST")
+				else:
+					contact_vessel(vessel_list[str(process_id)], "/access_granted", {}, "POST")
+			time.sleep(0.05)
 	
 	# ------------------------------------------------------------------------------------------------------
 	# EXECUTION
