@@ -343,17 +343,6 @@ try:
     # ------------------------------------------------------------------------------------------------------
     # HELPER FUNCTIONS
     # ------------------------------------------------------------------------------------------------------
-	# def handle_resource_lock():
-	# 	global locked, vessel_list, queue
-		
-	# 	while True:
-	# 		if(not locked and len(queue)):
-	# 			locked = True
-	# 			process_id = queue[0]
-	# 			contact_vessel(vessel_list[process_id], "/access_granted", {}, "POST") 
-
-
-
 			
     def time_to_results():
 		global node_id, ongoing_election, has_leader, ongoing_election, leader_id
@@ -387,6 +376,14 @@ try:
 			queue.append(process_id)
 		elif(leader_id != node_id and payload):
 			queue.append(payload)
+
+	def handle_resource_lock():
+		global locked, vessel_list, queue
+		while(True):
+			if(not locked and len(queue) > 0):
+				locked = True
+				process_id = queue[0]
+				contact_vessel(vessel_list[process_id], "/access_granted", {}, "POST")
 	
     # ------------------------------------------------------------------------------------------------------
     # EXECUTION
