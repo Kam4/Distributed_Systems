@@ -28,6 +28,7 @@ try:
     has_leader = False
     ongoing_election = False
     leader_id = 0
+    locked = False
 
     queue = deque()
 
@@ -117,9 +118,12 @@ try:
         try:
             new_entry = request.forms.get('entry')
 
-            
+        
             element_id = global_id
-            add_new_element_to_store(element_id, new_entry)
+            #add_new_element_to_store(element_id, new_entry)
+            
+            queue.append(new_entry)
+
 
             # you should propagate something
             # Please use threads to avoid blocking
@@ -129,8 +133,8 @@ try:
             # then call thread.start() to spawn the thread
 
             # Propagate action to all other nodes example :
-            thread = Thread(target=propagate_to_vessels,
-                            args=('/propagate/ADD/' + str(element_id), {'entry': new_entry}, 'POST'))
+            thread = Thread(target=contact_leader,
+                            args=('/leader/request_access/', {'process_id': node_id}, 'POST'))
             thread.daemon = True
             thread.start()
             return True
@@ -237,8 +241,25 @@ try:
 
     	return
 
+  	
 
+    # ------------------------------------------------------------------------------------------------------
+    # Leader Communication
+    # ------------------------------------------------------------------------------------------------------
 
+    @app.post('/leader/request_access')
+    def request_access():
+
+    	process_id = request.forms.get("process_id")
+    	add_to_queue(int(process_id))
+
+    @app.post('leader/request_done')
+    def request_done():
+    	global locked
+    	locked = False
+    	return
+
+	
 
 
     # ------------------------------------------------------------------------------------------------------
@@ -308,6 +329,27 @@ try:
     # ------------------------------------------------------------------------------------------------------
     # HELPER FUNCTIONS
     # ------------------------------------------------------------------------------------------------------
+	def add_to_queue(process_id = None, payload = None):
+		global queue, leader_id, node_id
+
+		if(leader_id == node_id and process_id):
+			queue.append(process_id)
+		elif(leader_id != node_id and payload):
+			queue.append(payload)
+
+	def handle_resource_lock():
+		global locked, vessel_list, queue
+		
+		while True:
+			if(not locked and len(queue)):
+				locked = True
+				process_id = queue[0]
+				contact_vessel(vessel_list[process_id], "/access_granted", {}, "POST") 
+
+			
+
+
+
 
     def time_to_results():
 		global node_id, ongoing_election, has_leader, ongoing_election, leader_id
@@ -329,13 +371,7 @@ try:
 			leader_id = node_id
 		return	
 
-	def add_to_queue(process_id = None, payload = None):
-		global queue, leader_id, node_id
-		if(leader_id == node_id and process_id):
-			queue.append(process_id)
-		elif(leader_id != node_id and payload):
-			queue.append(payload)
-		return
+
 
     # ------------------------------------------------------------------------------------------------------
     # EXECUTION
