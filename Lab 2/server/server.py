@@ -84,9 +84,9 @@ try:
     # No need to modify this
     @app.route('/')
     def index():
-    	global board, node_id, has_leader
+    	global board, node_id, has_leader, ongoing_election
     	
-    	if(not has_leader):
+    	if(not has_leader and not ongoing_election):
         	print("No leader.. Starting election for {}!".format(node_id))
     		thread_start = Thread(target=send_election_to_vessels,
                     args=('/election/start_election_and_request', {"process_id": node_id}, "POST"))
@@ -96,6 +96,7 @@ try:
 					args=())
         	thread_time.daemon = True
         	thread_time.start()
+        	ongoing_election = True
 
     		print("Election started!")
 
@@ -122,7 +123,7 @@ try:
             element_id = global_id
             #add_new_element_to_store(element_id, new_entry)
             
-            queue.append(new_entry)
+            add_to_queue(payload=new_entry)
 
 
             # you should propagate something
@@ -133,14 +134,19 @@ try:
             # then call thread.start() to spawn the thread
 
             # Propagate action to all other nodes example :
-            thread = Thread(target=contact_leader,
-                            args=('/leader/request_access/', {'process_id': node_id}, 'POST'))
-            thread.daemon = True
-            thread.start()
+            contact_leader('/leader/request_access', {"process_id": node_id})
             return True
         except Exception as e:
             print e
         return False
+
+    @app.post('/access_granted')
+    def access_granted():
+    	global vessel_list, leader_id
+    	entry = queue.popleft()
+    	contact_vessel(vessel_list[leader_id], '/leader/store_data', entry, 'POST')
+
+
 
     @app.post('/board/<element_id:int>/')
     def client_action_received(element_id):
@@ -249,19 +255,32 @@ try:
 
     @app.post('/leader/request_access')
     def request_access():
-
     	process_id = request.forms.get("process_id")
-    	add_to_queue(int(process_id))
+    	add_to_queue(process_id = int(process_id))
 
     @app.post('leader/request_done')
     def request_done():
-    	global locked
+    	global locked, queue
+    	queue.popleft()
     	locked = False
     	return
 
-	
+    @app.post('leader/store_data')
+    def store_data():
+    	global locked, global_id
+
+    	entry = request.forms.get("entry")
+    	add_new_element_to_store(global_id, entry)
+    	global_id += 1
+
+    	thread = Thread(target=propagate_to_vessels,
+    		args=('/propagate/ADD/' + str(global_id), entry, 'POST'))
+    	thread.daemon = True
+    	thread.start()
 
 
+
+    
     # ------------------------------------------------------------------------------------------------------
     # DISTRIBUTED COMMUNICATIONS FUNCTIONS
     # ------------------------------------------------------------------------------------------------------
@@ -329,28 +348,18 @@ try:
     # ------------------------------------------------------------------------------------------------------
     # HELPER FUNCTIONS
     # ------------------------------------------------------------------------------------------------------
-	def add_to_queue(process_id = None, payload = None):
-		global queue, leader_id, node_id
-
-		if(leader_id == node_id and process_id):
-			queue.append(process_id)
-		elif(leader_id != node_id and payload):
-			queue.append(payload)
-
-	def handle_resource_lock():
-		global locked, vessel_list, queue
+	# def handle_resource_lock():
+	# 	global locked, vessel_list, queue
 		
-		while True:
-			if(not locked and len(queue)):
-				locked = True
-				process_id = queue[0]
-				contact_vessel(vessel_list[process_id], "/access_granted", {}, "POST") 
+	# 	while True:
+	# 		if(not locked and len(queue)):
+	# 			locked = True
+	# 			process_id = queue[0]
+	# 			contact_vessel(vessel_list[process_id], "/access_granted", {}, "POST") 
+
+
 
 			
-
-
-
-
     def time_to_results():
 		global node_id, ongoing_election, has_leader, ongoing_election, leader_id
 
@@ -369,10 +378,21 @@ try:
 			has_leader = True
 			ongoing_election = False
 			leader_id = node_id
+
+			thread_resource = Thread(target=handle_resource_lock,
+				arg=())
+			thread_resource.daemon = True
+			thread_resource.start()
 		return	
 
+	def add_to_queue(process_id = None, payload = None):
+		global queue, leader_id, node_id
 
-
+		if(leader_id == node_id and process_id):
+			queue.append(process_id)
+		elif(leader_id != node_id and payload):
+			queue.append(payload)
+	
     # ------------------------------------------------------------------------------------------------------
     # EXECUTION
     # ------------------------------------------------------------------------------------------------------
