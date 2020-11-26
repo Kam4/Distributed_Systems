@@ -84,21 +84,21 @@ try:
     # No need to modify this
     @app.route('/')
     def index():
-    	global board, node_id, has_leader, ongoing_election
-    	
-    	if(not has_leader and not ongoing_election):
-        	print("No leader.. Starting election for {}!".format(node_id))
-    		thread_start = Thread(target=send_election_to_vessels,
-                    args=('/election/start_election_and_request', {"process_id": node_id}, "POST"))
-    		thread_start.daemon = True
-        	thread_start.start()
-        	thread_time = Thread(target=time_to_results,
-					args=())
-        	thread_time.daemon = True
-        	thread_time.start()
-        	ongoing_election = True
+        global board, node_id, has_leader, ongoing_election
 
-    		print("Election started!")
+        if(not has_leader and not ongoing_election):
+            print("No leader.. Starting election for {}!".format(node_id))
+            thread_start = Thread(target=send_election_to_vessels,
+                    args=('/election/start_election_and_request', {"process_id": node_id}, "POST"))
+            thread_start.daemon = True
+            thread_start.start()
+            thread_time = Thread(target=time_to_results,
+                    args=())
+            thread_time.daemon = True
+            thread_time.start()
+            ongoing_election = True
+
+            print("Election started!")
 
         return template('server/index.tpl', board_title='Vessel {}'.format(node_id),
                         board_dict=sorted({"0": board, }.iteritems()), members_name_string='Andreas Månsson, Kamil Mudy and Tulathorn Sripongpankul')
@@ -142,9 +142,9 @@ try:
 
     @app.post('/access_granted')
     def access_granted():
-    	global vessel_list, leader_id
-    	entry = queue.popleft()
-    	contact_vessel(vessel_list[leader_id], '/leader/store_data', entry, 'POST')
+        global vessel_list, leader_id
+        entry = queue.popleft()
+        contact_vessel(vessel_list[leader_id], '/leader/store_data', entry, 'POST')
 
 
 
@@ -160,7 +160,7 @@ try:
         delete_option = request.forms.get('delete')
 
         print "the delete option is ", delete_option
-       
+
         # 0 = modify, 1 = delete
         if(int(delete_option) == 0):
             modify_element_in_store(element_id, entry, False)
@@ -200,54 +200,50 @@ try:
 
     @app.post('/election/<action>')
     def election(action):
-    	global vessel_list, has_leader, ongoing_election, node_id, leader_id
+        global vessel_list, has_leader, ongoing_election, node_id, leader_id
 
-    	process_id = request.forms.get("process_id")
+        process_id = request.forms.get("process_id")
 
-    	print("Got a request from node: {} and I am node: {}".format(process_id, node_id))
+        print("Got a request from node: {} and I am node: {}".format(process_id, node_id))
 
-    	if(action == "start_election_and_request"):
-			if(int(process_id) < int(node_id)):
-				print("Got election request from {}, I am bigger, sending response!".format(process_id))
-				contact_vessel(vessel_list[process_id],  "/election/response_election", {"process_id": node_id})
-			ongoing_election = True
-			print("Got a start election notice, sending my election requests out!")
-			thread = Thread(target=send_election_to_vessels,
-				args=("/election/request_election", {"process_id": node_id}, "POST"))
-			thread.daemon = True	
-			thread.start()
+        if(action == "start_election_and_request"):
+            if(int(process_id) < int(node_id)):
+                print("Got election request from {}, I am bigger, sending response!".format(process_id))
+                contact_vessel(vessel_list[process_id],  "/election/response_election", {"process_id": node_id})
+            ongoing_election = True
+            print("Got a start election notice, sending my election requests out!")
+            thread = Thread(target=send_election_to_vessels,
+                args=("/election/request_election", {"process_id": node_id}, "POST"))
+            thread.daemon = True	
+            thread.start()
 
-			#Thread to keep track of time
-			thread_time = Thread(target=time_to_results,
-				args=())
-			thread_time.daemon = True
-			thread_time.start()
-			return
+            #Thread to keep track of time
+            thread_time = Thread(target=time_to_results,
+                args=())
+            thread_time.daemon = True
+            thread_time.start()
+            return
 
+        if(action == "request_election"):
+            if(int(process_id) < int(node_id)):
+                print("Got election request, I am bigger, sending response! -- ")
+                contact_vessel(vessel_list[process_id], "/election/response_election", {"process_id": node_id})
+                return
+            return
 
-    	if(action == "request_election"):
-    		if(int(process_id) < int(node_id)):
-    			print("Got election request, I am bigger, sending response! -- ")
-    			contact_vessel(vessel_list[process_id], "/election/response_election", {"process_id": node_id})
-	    		return
-	    	return
+        if(action == "response_election"):
+            print("Received response in election, I am not leader.")
+            ongoing_election = False
+            return
 
-    	if(action == "response_election"):
-    		print("Received response in election, I am not leader.")
-    		ongoing_election = False
-    		return
+        if(action == "election_result"):
+            print("Got a new leader!")
+            ongoing_election = False
+            has_leader = True
+            leader_id = int(process_id)
+            return
 
-
-    	if(action == "election_result"):
-    		print("Got a new leader!")
-    		ongoing_election = False
-    		has_leader = True
-    		leader_id = int(process_id)
-    		return
-
-    	return
-
-  	
+        return
 
     # ------------------------------------------------------------------------------------------------------
     # Leader Communication
@@ -255,28 +251,28 @@ try:
 
     @app.post('/leader/request_access')
     def request_access():
-    	process_id = request.forms.get("process_id")
-    	add_to_queue(process_id = int(process_id))
+        process_id = request.forms.get("process_id")
+        add_to_queue(process_id = int(process_id))
 
     @app.post('leader/request_done')
     def request_done():
-    	global locked, queue
-    	queue.popleft()
-    	locked = False
-    	return
+        global locked, queue
+        queue.popleft()
+        locked = False
+        return
 
     @app.post('leader/store_data')
     def store_data():
-    	global locked, global_id
+        global locked, global_id
 
-    	entry = request.forms.get("entry")
-    	add_new_element_to_store(global_id, entry)
-    	global_id += 1
+        entry = request.forms.get("entry")
+        add_new_element_to_store(global_id, entry)
+        global_id += 1
 
-    	thread = Thread(target=propagate_to_vessels,
-    		args=('/propagate/ADD/' + str(global_id), entry, 'POST'))
-    	thread.daemon = True
-    	thread.start()
+        thread = Thread(target=propagate_to_vessels,
+            args=('/propagate/ADD/' + str(global_id), entry, 'POST'))
+        thread.daemon = True
+        thread.start()
 
 
 
@@ -315,19 +311,19 @@ try:
 
 
     def send_election_to_vessels(path, payload=None, req="POST"):
-    	global vessel_list, node_id
+        global vessel_list, node_id
 
-    	print("send_election_to_vessels()")
+        print("send_election_to_vessels()")
 
-    	for vessel_id, vessel_ip in vessel_list.items():
-    		if int(vessel_id) > node_id:
-    			success = contact_vessel(vessel_ip, path, payload, req)
-    			if not success:
-    				print "\n\nCould not contact vessel {}\n\n".format(vessel_id)
+        for vessel_id, vessel_ip in vessel_list.items():
+            if int(vessel_id) > node_id:
+                success = contact_vessel(vessel_ip, path, payload, req)
+                if not success:
+                    print "\n\nCould not contact vessel {}\n\n".format(vessel_id)
 
     def contact_leader(path, payload=None, req="POST"):
-    	global vessel_list, leader_id
-    	success = False
+        global vessel_list, leader_id
+        success = False
         try:
             if 'POST' in req:
                 res = requests.post(
@@ -343,7 +339,6 @@ try:
         except Exception as e:
             print e
         return success
-    	
 
     # ------------------------------------------------------------------------------------------------------
     # HELPER FUNCTIONS
