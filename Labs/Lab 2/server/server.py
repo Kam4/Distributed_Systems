@@ -112,7 +112,7 @@ try:
 			new_entry = request.forms.get('entry')
 			element_id = global_id
 			if(node_id == leader_id):
-				leader_queue.append(new_entry)
+				leader_queue.append({0:new_entry})
 				add_to_queue(process_id=node_id)
 				return True
 			path = '/leader/request_access'
@@ -151,8 +151,16 @@ try:
 
 		# 0 = modify, 1 = delete
 		if(int(delete_option) == 0):
+			if(node_id == leader_id):
+				leader_queue.append({1:[element_id, entry]})
+				add_to_queue(process_id=node_id)
+				return True
 			add_to_queue(payload={"/leader/modify_data/"+str(element_id): entry})
 		elif(int(delete_option) == 1):
+			if(node_id == leader_id):
+				leader_queue.append({2:element_id})
+				add_to_queue(process_id=node_id)
+				return True
 			add_to_queue(payload={"/leader/delete_data/"+str(element_id): entry})
 		success = contact_leader(path, payload)
 		if(not success):
@@ -424,12 +432,25 @@ try:
 				if(process_id == leader_id):
 					queue.pop()
 					print("Resource queue right now: ", leader_queue)
-					entry = leader_queue.pop()
-					add_new_element_to_store(global_id, entry)
-					thread_propagate = Thread(target=propagate_to_vessels,
-						args=('/propagate/ADD/' + str(global_id), {"entry": entry}, 'POST'))
-					thread_propagate.daemon = True
-					thread_propagate.start()
+					option, data = leader_queue.pop().items()[0]
+					if option == 0:
+						add_new_element_to_store(global_id, data)
+						thread_propagate = Thread(target=propagate_to_vessels,
+							args=('/propagate/ADD/' + str(global_id), {"entry": data}, 'POST'))
+						thread_propagate.daemon = True
+						thread_propagate.start()
+					elif option == 1:
+						modify_element_in_store(data[0], data[1], False)
+						thread = Thread(target=propagate_to_vessels,
+							args=('/propagate/DELETEorMODIFY/' + str(data[0]), {'entry': data[1], "delete": 0}, 'POST'))
+						thread.daemon = True
+						thread.start()
+					elif option == 2:
+						delete_element_from_store(data, False)
+						thread = Thread(target=propagate_to_vessels,
+							args=('/propagate/DELETEorMODIFY/' + str(data), {"delete": 1}, 'POST'))
+						thread.daemon = True
+						thread.start()
 					locked = False
 				else:
 					contact_vessel(vessel_list[str(process_id)], "/access_granted", {}, "POST")
