@@ -45,7 +45,6 @@ try:
 	def add_new_element_to_store(entry_sequence, element, is_propagated_call=False):
 		global board, node_id, global_id
 		success = False
-		print("GLOBAL ID: ",global_id)
 		if(not is_propagated_call):
 			increase_global_id()
 			entry_sequence = global_id
@@ -127,7 +126,7 @@ try:
 				leader_queue.append(new_entry)
 				add_to_queue(process_id=node_id)
 				return True
-			add_to_queue(payload=new_entry)
+			add_to_queue(payload={"/leader/store_data": new_entry})
 			contact_leader('/leader/request_access', {"process_id": node_id})
 			return True
 		except Exception as e:
@@ -137,36 +136,28 @@ try:
 	@app.post('/access_granted')
 	def access_granted():
 		global vessel_list, leader_id
-		for i in range(0, len(queue)):	
-			entry = queue.popleft()
-			contact_vessel(vessel_list[str(leader_id)], '/leader/store_data', {"entry":entry}, 'POST')
+		for i in range(0, len(queue)):
+			queue_item = queue.popleft()
+			path, entry = queue_item.items()[0]
+			contact_vessel(vessel_list[str(leader_id)], path, {"entry":entry}, 'POST')
 		contact_vessel(vessel_list[str(leader_id)], "/leader/request_done")
 
 
 	@app.post('/board/<element_id:int>/')
 	def client_action_received(element_id):
-		global board, node_id
+		global board, node_id, vessel_list, leader_id, leader_queue
 
-		print "You receive an element"
-		print "id is ", node_id
-		# Get the entry from the HTTP body
 		entry = request.forms.get('entry')
 
 		delete_option = request.forms.get('delete')
 
-		print "the delete option is ", delete_option
-
 		# 0 = modify, 1 = delete
 		if(int(delete_option) == 0):
-			modify_element_in_store(element_id, entry, False)
+			add_to_queue(payload={"/leader/modify_data/"+str(element_id): entry})
 		elif(int(delete_option) == 1):
-			delete_element_from_store(element_id, False)
-
-		# propage to other nodes
-		thread = Thread(target=propagate_to_vessels,
-						args=('/propagate/DELETEorMODIFY/' + str(element_id), {'entry': entry, "delete": delete_option}, 'POST'))
-		thread.daemon = True
-		thread.start()
+			add_to_queue(payload={"/leader/delete_data/"+str(element_id): entry})
+		contact_leader('/leader/request_access', {"process_id": node_id})
+		return
 
 	# With this function you handle requests from other nodes like add modify or delete
 	@app.post('/propagate/<action>/<element_id:int>')
@@ -260,17 +251,48 @@ try:
 	def store_data():
 		global locked, global_id
 
-		increase_global_id()
+		#increase_global_id()
 
 		print("Current node with access has sent data to store.")
 
 		entry = request.forms.get("entry")
-		add_new_element_to_store(global_id, entry, True)
+		add_new_element_to_store(global_id, entry, False)
 
 		thread = Thread(target=propagate_to_vessels,
 			args=('/propagate/ADD/' + str(global_id), {"entry": entry}, 'POST'))
 		thread.daemon = True
 		thread.start()
+
+	@app.post('/leader/modify_data/<element_id:int>')
+	def modify_data(element_id):
+
+		print("Current node with access has sent data to modify")
+
+		entry = request.forms.get("entry")
+
+		delete_option = 0 #only modifying here
+
+		modify_element_in_store(element_id, entry, False)
+
+		thread = Thread(target=propagate_to_vessels,
+			args=('/propagate/DELETEorMODIFY/' + str(element_id), {'entry': entry, "delete": delete_option}, 'POST'))
+		thread.daemon = True
+		thread.start()
+
+	@app.post('/leader/delete_data/<element_id:int>')
+	def delete_data(element_id):
+
+		print("Current node with access has sent data to delete")
+
+		delete_option = 1 #only modifying here
+
+		delete_element_from_store(element_id, False)
+
+		thread = Thread(target=propagate_to_vessels,
+			args=('/propagate/DELETEorMODIFY/' + str(element_id), {"delete": delete_option}, 'POST'))
+		thread.daemon = True
+		thread.start()
+
 
 
 
@@ -391,7 +413,7 @@ try:
 				process_id = queue[0]
 				if(process_id == leader_id):
 					queue.pop()
-					print("DEQUEUEUEUEUUUE: ", leader_queue)
+					print("Resource queue right now: ", leader_queue)
 					entry = leader_queue.pop()
 					add_new_element_to_store(global_id, entry)
 					thread_propagate = Thread(target=propagate_to_vessels,
