@@ -90,18 +90,7 @@ try:
 		global board, node_id, has_leader, ongoing_election
 
 		if(not has_leader and not ongoing_election):
-			print("No leader.. Starting election for {}!".format(node_id))
-			thread_start = Thread(target=send_election_to_vessels,
-					args=('/election/start_election_and_request', {"process_id": node_id}, "POST"))
-			thread_start.daemon = True
-			thread_start.start()
-			thread_time = Thread(target=time_to_results,
-					args=())
-			thread_time.daemon = True
-			thread_time.start()
-			ongoing_election = True
-
-			print("Election started!")
+			start_election()
 
 		return template('server/index.tpl', board_title='Vessel {}'.format(node_id),
 						board_dict=sorted({"0": board, }.iteritems()), members_name_string='Andreas Månsson, Kamil Mudy and Tulathorn Sripongpankul')
@@ -126,8 +115,14 @@ try:
 				leader_queue.append(new_entry)
 				add_to_queue(process_id=node_id)
 				return True
+			path = '/leader/request_access'
+			payload_for_leader = {"process_id": node_id}
 			add_to_queue(payload={"/leader/store_data": new_entry})
-			contact_leader('/leader/request_access', {"process_id": node_id})
+			success = contact_leader(path, payload_for_leader)
+			if not success:
+				retried_success = retry_connection(path, payload_for_leader)
+				if(not retried_success):
+					return False
 			return True
 		except Exception as e:
 			print e
@@ -151,13 +146,20 @@ try:
 
 		delete_option = request.forms.get('delete')
 
+		path = '/leader/request_access'
+		payload_for_leader = {"process_id": node_id}
+
 		# 0 = modify, 1 = delete
 		if(int(delete_option) == 0):
 			add_to_queue(payload={"/leader/modify_data/"+str(element_id): entry})
 		elif(int(delete_option) == 1):
 			add_to_queue(payload={"/leader/delete_data/"+str(element_id): entry})
-		contact_leader('/leader/request_access', {"process_id": node_id})
-		return
+		success = contact_leader(path, payload)
+		if(not success):
+			retried_success = retry_connection(path, payload)
+			if(not retried_success):
+				return False
+		return True
 
 	# With this function you handle requests from other nodes like add modify or delete
 	@app.post('/propagate/<action>/<element_id:int>')
@@ -250,14 +252,9 @@ try:
 	@app.post('/leader/store_data')
 	def store_data():
 		global locked, global_id
-
-		#increase_global_id()
-
 		print("Current node with access has sent data to store.")
-
 		entry = request.forms.get("entry")
 		add_new_element_to_store(global_id, entry, False)
-
 		thread = Thread(target=propagate_to_vessels,
 			args=('/propagate/ADD/' + str(global_id), {"entry": entry}, 'POST'))
 		thread.daemon = True
@@ -265,15 +262,10 @@ try:
 
 	@app.post('/leader/modify_data/<element_id:int>')
 	def modify_data(element_id):
-
 		print("Current node with access has sent data to modify")
-
 		entry = request.forms.get("entry")
-
 		delete_option = 0 #only modifying here
-
 		modify_element_in_store(element_id, entry, False)
-
 		thread = Thread(target=propagate_to_vessels,
 			args=('/propagate/DELETEorMODIFY/' + str(element_id), {'entry': entry, "delete": delete_option}, 'POST'))
 		thread.daemon = True
@@ -281,22 +273,14 @@ try:
 
 	@app.post('/leader/delete_data/<element_id:int>')
 	def delete_data(element_id):
-
 		print("Current node with access has sent data to delete")
-
 		delete_option = 1 #only modifying here
-
 		delete_element_from_store(element_id, False)
-
 		thread = Thread(target=propagate_to_vessels,
 			args=('/propagate/DELETEorMODIFY/' + str(element_id), {"delete": delete_option}, 'POST'))
 		thread.daemon = True
 		thread.start()
 
-
-
-
-	
 	# ------------------------------------------------------------------------------------------------------
 	# DISTRIBUTED COMMUNICATIONS FUNCTIONS
 	# ------------------------------------------------------------------------------------------------------
@@ -366,7 +350,33 @@ try:
 	# ------------------------------------------------------------------------------------------------------
 	# HELPER FUNCTIONS
 	# ------------------------------------------------------------------------------------------------------
-			
+
+	def retry_connection(path=None, payload=None):
+		retried_success = False
+		for i in range(0,2):
+			retried_success = contact_leader(path, payload)
+			if(retried_success):
+				break
+			if(not retried_success):
+				start_election()
+				return False
+		return True
+
+	def start_election():
+		global ongoing_election, has_leader
+		print("No leader responding.. Starting election for {}!".format(node_id))
+		thread_start = Thread(target=send_election_to_vessels,
+			args=('/election/start_election_and_request', {"process_id": node_id}, "POST"))
+		thread_start.daemon = True
+		thread_start.start()
+		thread_time = Thread(target=time_to_results,
+			args=())
+		thread_time.daemon = True
+		thread_time.start()
+		has_leader = False
+		ongoing_election = True
+		print("Election started!")
+
 	def increase_global_id():
 		global global_id
 		global_id += 1
@@ -375,13 +385,13 @@ try:
 		global node_id, ongoing_election, has_leader, ongoing_election, leader_id
 
 		time_voted = time.time()
-		buffer_time = 2
+		buffer_time = 3
 		time_now = time.time()
 
 		while(time_now - time_voted < buffer_time):
 			print("Waiting for time to be end")
 			time_now = time.time()
-			time.sleep(0.2)
+			time.sleep(0.05)
 
 		if(ongoing_election):
 			print("I won the election, propagating this information!")
