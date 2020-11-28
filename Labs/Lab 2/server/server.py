@@ -114,10 +114,11 @@ try:
 			if(node_id == leader_id):
 				leader_queue.append({0:new_entry})
 				add_to_queue(process_id=node_id)
+
 				return True
 			path = '/leader/request_access'
 			payload_for_leader = {"process_id": node_id}
-			add_to_queue(payload={"/leader/store_data": new_entry})
+			add_to_queue(payload={"entry": new_entry, "path":"/leader/store_data", "process_id": node_id})
 			success = contact_leader(path, payload_for_leader)
 			if not success:
 				retried_success = retry_connection(path, payload_for_leader)
@@ -133,7 +134,8 @@ try:
 		global vessel_list, leader_id
 		for i in range(0, len(queue)):
 			queue_item = queue.popleft()
-			path, entry = queue_item.items()[0]
+			path = queue_item["path"]
+			entry = queue_item["entry"]
 			contact_vessel(vessel_list[str(leader_id)], path, {"entry":entry}, 'POST')
 		contact_vessel(vessel_list[str(leader_id)], "/leader/request_done")
 
@@ -155,16 +157,16 @@ try:
 				leader_queue.append({1:[element_id, entry]})
 				add_to_queue(process_id=node_id)
 				return True
-			add_to_queue(payload={"/leader/modify_data/"+str(element_id): entry})
+			add_to_queue(payload={"path": "/leader/modify_data/"+str(element_id), "entry": entry, "process_id": node_id})
 		elif(int(delete_option) == 1):
 			if(node_id == leader_id):
 				leader_queue.append({2:element_id})
 				add_to_queue(process_id=node_id)
 				return True
-			add_to_queue(payload={"/leader/delete_data/"+str(element_id): entry})
-		success = contact_leader(path, payload)
+			add_to_queue(payload={"path": "/leader/delete_data/"+str(element_id), "entry": entry, "process_id": node_id})
+		success = contact_leader(path, payload_for_leader)
 		if(not success):
-			retried_success = retry_connection(path, payload)
+			retried_success = retry_connection(path, payload_for_leader)
 			if(not retried_success):
 				return False
 		return True
@@ -195,7 +197,7 @@ try:
 
 	@app.post('/election/<action>')
 	def election(action):
-		global vessel_list, has_leader, ongoing_election, node_id, leader_id
+		global vessel_list, has_leader, ongoing_election, node_id, leader_id, queue
 
 		process_id = request.forms.get("process_id")
 
@@ -204,7 +206,11 @@ try:
 		if(action == "start_election_and_request"):
 			if(int(process_id) < int(node_id)):
 				print("Got election request from {}, I am bigger, sending response!".format(process_id))
-				contact_vessel(vessel_list[process_id],  "/election/response_election", {"process_id": node_id})
+				#contact_vessel(vessel_list[process_id],  "/election/response_election", {"process_id": node_id})
+				thread = Thread(target=contact_vessel,
+					args=(vessel_list[process_id], '/election/response_election', {"process_id": node_id}))
+				thread.daemon = True
+				thread.start()
 			ongoing_election = True
 			print("Got a start election notice, sending my election requests out!")
 			thread = Thread(target=send_election_to_vessels,
@@ -222,7 +228,11 @@ try:
 		if(action == "request_election"):
 			if(int(process_id) < int(node_id)):
 				print("Got election request, I am bigger, sending response! ")
-				contact_vessel(vessel_list[process_id], "/election/response_election", {"process_id": node_id})
+				#contact_vessel(vessel_list[process_id], "/election/response_election", {"process_id": node_id})
+				thread = Thread(target=contact_vessel,
+					args=(vessel_list[process_id], '/election/response_election', {"process_id": node_id}))
+				thread.daemon = True
+				thread.start()
 				return
 			return
 
@@ -236,6 +246,7 @@ try:
 			ongoing_election = False
 			has_leader = True
 			leader_id = int(process_id)
+			contact_leader('/leader/request_access', {"process_id": node_id})
 			return
 		return
 
@@ -296,6 +307,7 @@ try:
 	def contact_vessel(vessel_ip, path, payload=None, req='POST'):
 		# Try to contact another server (vessel) through a POST or GET, once
 		success = False
+		print("IN CONTACNT VESSEL")
 		try:
 			if 'POST' in req:
 				res = requests.post(
@@ -426,13 +438,28 @@ try:
 	def handle_resource_lock():
 		global locked, vessel_list, queue, leader_id, leader_queue, global_id, node_id
 		while(leader_id == node_id):
+			option = False
+			data = False
 			if(not locked and len(queue) > 0):
 				locked = True
-				process_id = queue[0]
+				process_id = queue[0] 
+				if(type(process_id) == dict):
+					data = process_id["entry"]
+					if("store" in process_id["path"]):
+						option = 0
+					elif("delete" in process_id["path"]):
+						option = 2
+					elif("modify" in process_id["path"]):
+						option = 1
+
+					process_id = process_id["process_id"]
+	
 				if(process_id == leader_id):
 					queue.pop()
-					print("Resource queue right now: ", leader_queue)
-					option, data = leader_queue.pop().items()[0]
+
+					if(not option and not data):
+						print("Resource queue right now: ", leader_queue)
+						option, data = leader_queue.pop().items()[0]
 					if option == 0:
 						add_new_element_to_store(global_id, data)
 						thread_propagate = Thread(target=propagate_to_vessels,
