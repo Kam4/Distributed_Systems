@@ -181,6 +181,7 @@ try:
 		
 		#Check request type
 		if(action == "ADD"):
+			increase_global_id()
 			add_new_element_to_store(element_id, entry, True)
 			return
 
@@ -246,7 +247,9 @@ try:
 			ongoing_election = False
 			has_leader = True
 			leader_id = int(process_id)
-			contact_leader('/leader/request_access', {"process_id": node_id})
+			if(len(queue) > 0):
+				print("Contacting leader because I have things in queue........ ------- ******** ")
+				contact_leader('/leader/request_access', {"process_id": node_id})
 			return
 		return
 
@@ -415,7 +418,10 @@ try:
 
 		if(ongoing_election):
 			print("I won the election, propagating this information!")
-			propagate_to_vessels("/election/election_result", {"process_id":node_id}, "POST")
+			thread_t = Thread(target=propagate_to_vessels,
+				args=("/election/election_result", {"process_id":node_id}, "POST"))
+			thread_t.daemon = True
+			thread_t.start()
 			has_leader = True
 			ongoing_election = False
 			leader_id = node_id
@@ -429,8 +435,10 @@ try:
 	def add_to_queue(process_id = None, payload = None):
 		global queue, leader_id, node_id
 		if(leader_id == node_id and process_id):
+			print("In leader add to queue")
 			queue.append(process_id)
 		elif(leader_id != node_id and payload):
+			print("In elif add to queue")
 			queue.append(payload)
 		print("Added entry to queue")
 		print(queue)
