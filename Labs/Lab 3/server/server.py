@@ -3,189 +3,147 @@
 # TDA596 - Lab 1
 # server/server.py
 # Input: Node_ID total_number_of_ID
-# Student: John Doe
+# Students: Socrates, Plato, Aristotle
 # ------------------------------------------------------------------------------------------------------
 import traceback
-import sys
 import time
-import json
 import argparse
 from threading import Thread
-
 from bottle import Bottle, run, request, template
 import requests
-# ------------------------------------------------------------------------------------------------------
-try:
-    app = Bottle()
 
-    # board stores all message on the system
-    board = {0: "Welcome to Distributed Systems Course"}
+class Server:
+    def __init__(self, host, port, node_list, node_id):
+        self._host = host
+        self._port = port
+        self._app = Bottle()
+        self._route()
+        self.board = {0: "Welcome to Distributed Systems Course"}
+        self.node_list = node_list
+        self.node_id = node_id
 
-    # local board to add local element into the board.
-    local_board = {}
+    def _route(self):
+        self._app.route('/', method="GET", callback=self.index)
+        self._app.route('/board', method="GET", callback=self.get_board)
+        self._app.route('/board', method="POST", callback=self.client_add_received)
+        self._app.route('/board/<element_id:int>/', method="POST", callback=self.client_action_received)
+        self._app.route('/propagate/<action>/<element_id:int>', method="POST", callback=self.propagation_received)
 
-    # Clock
-    clock = []
 
-    #Globa_id for elements so that each element gets a unique ID
-    global_id = 1
+    def start(self):
+        self._app.run(host=self._host, port=self._port)
 
-    # ------------------------------------------------------------------------------------------------------
-    # BOARD FUNCTIONS
-    # You will probably need to modify them
-    # ------------------------------------------------------------------------------------------------------
-
-    # This functions will add an new element
-
-    
-    def add_new_element_to_store(entry_sequence, element, is_propagated_call=False):
-        global board, node_id, global_id
-        success = False
-        try:
-            if entry_sequence not in board:
-                board[entry_sequence] = element
-                success = True
-        except Exception as e:
-            print e
-        #For each new entry increment global ID
-        global_id += 1
-        return success
-
-    #Modify Entry in the board
-    def modify_element_in_store(entry_sequence, modified_element, is_propagated_call=False):
-        global board, node_id
-        success = False
-        try:
-            board[entry_sequence] = modified_element
-            success = True
-        except Exception as e:
-            print e
-        return success
-    
-    #Delete Entry in the board
-    def delete_element_from_store(entry_sequence, is_propagated_call=False):
-        global board, node_id
-        success = False
-        try:
-            del board[entry_sequence]
-            success = True
-        except Exception as e:
-            print e
-        return success
 
     # ------------------------------------------------------------------------------------------------------
-    # ROUTES
+    # ROOUTE FUNCTIONS
     # ------------------------------------------------------------------------------------------------------
-    # a single example (index) for get, and one for post
-    # ------------------------------------------------------------------------------------------------------
-    # No need to modify this
-    @app.route('/')
-    def index():
-        global board, node_id
-        return template('server/index.tpl', board_title='Vessel {}'.format(node_id),
-                        board_dict=sorted({"0": board, }.iteritems()), members_name_string='Andreas Månsson, Kamil Mudy and Tulathorn Sripongpankul')
+    # GET '/'
+    def index(self):
+        return template('server/index.tpl', board_title='Node {}'.format(self.node_id),
+                        board_dict=sorted({"0": self.board, }.iteritems()), members_name_string='Socrates, '
+                                                                                           'Plato, '
+                                                                                           'Aristotle')
 
-    @app.get('/board')
-    def get_board():
-        global board, node_id
-        print board
-        return template('server/boardcontents_template.tpl', board_title='Vessel {}'.format(node_id), board_dict=sorted(board.iteritems()))
+    # GET '/board'
+    def get_board(self):
+        print self.board
+        return template('server/boardcontents_template.tpl', board_title='Node {}'.format(self.node_id),
+                        board_dict=sorted(self.board.iteritems()))
 
-    # ------------------------------------------------------------------------------------------------------
-
-    # You NEED to change the follow functions
-    @app.post('/board')
-    def client_add_received():
-        '''Adds a new element to the board
-        Called directly when a user is doing a POST request on /board'''
-        global board, node_id
+    # POST '/board'
+    def client_add_received(self):
+        """Adds a new element to the board
+        Called directly when a user is doing a POST request on /board"""
         try:
             new_entry = request.forms.get('entry')
+            element_id = len(self.board)  # you need to generate a entry number
+            self.add_new_element_to_store(element_id, new_entry)
 
-            
-            element_id = global_id
-            add_new_element_to_store(element_id, new_entry)
+            thread = Thread(target=self.propagate_to_nodes,
+                            args=('/propagate/ADD/' + str(element_id),
+                                  {'entry': new_entry},
+                                  'POST'))
 
-            # you should propagate something
-            # Please use threads to avoid blocking
-            # thread = Thread(target=???,args=???)
-            # For example: thread = Thread(target=propagate_to_vessels, args=....)
-            # you should create the thread as a deamon with thread.daemon = True
-            # then call thread.start() to spawn the thread
-
-            # Propagate action to all other nodes example :
-            thread = Thread(target=propagate_to_vessels,
-                            args=('/propagate/ADD/' + str(element_id), {'entry': new_entry}, 'POST'))
             thread.daemon = True
             thread.start()
-            return True
+            return '<h1>Successfully added entry</h1>'
         except Exception as e:
             print e
         return False
 
-    @app.post('/board/<element_id:int>/')
-    def client_action_received(element_id):
-        global board, node_id
 
+    # POST '/board/<element_id:int>/'
+    def client_action_received(self, element_id):
         print "You receive an element"
-        print "id is ", node_id
-        # Get the entry from the HTTP body
-        entry = request.forms.get('entry')
+        print "id is ", self.node_id
+        try:
+            # Get the entry from the HTTP body
+            entry = request.forms.get('entry')
 
-        delete_option = request.forms.get('delete')
+            delete_option = request.forms.get('delete')
+            # 0 = modify, 1 = delete
 
-        print "the delete option is ", delete_option
-       
-        # 0 = modify, 1 = delete
-        if(int(delete_option) == 0):
-            modify_element_in_store(element_id, entry, False)
-        elif(int(delete_option) == 1):
-            delete_element_from_store(element_id, False)
+            print "the delete option is ", delete_option
 
-        # propage to other nodes
-        thread = Thread(target=propagate_to_vessels,
-                        args=('/propagate/DELETEorMODIFY/' + str(element_id), {'entry': entry, "delete": delete_option}, 'POST'))
-        thread.daemon = True
-        thread.start()
+            # call either delete or modify
+            if delete_option == '0':
+                self.modify_element_in_store(element_id, entry)
+                propagate_action = 'MODIFY'
+
+            elif delete_option == '1':
+                print 'Element id is: ', element_id
+                self.delete_element_from_store(element_id)
+                propagate_action = 'DELETE'
+            else:
+                raise Exception("Unaccepted delete option")
+
+            print propagate_action
+
+            # propage to other nodes
+            thread = Thread(target=self.propagate_to_nodes,
+                            args=('/propagate/' + propagate_action + '/' + str(element_id),
+                                  {'entry': entry},
+                                  'POST'))
+            thread.daemon = True
+            thread.start()
+            return '<h1>Successfully ' + propagate_action + ' entry</h1>'
+        except Exception as e:
+            print e
+        return False
+
 
     # With this function you handle requests from other nodes like add modify or delete
-    @app.post('/propagate/<action>/<element_id:int>')
-    def propagation_received(action, element_id):
+    # POST '/propagate/<action>/<element_id:int>'
+    def propagation_received(self, action, element_id):
         # get entry from http body
         entry = request.forms.get('entry')
         print "the action is", action
 
-        
-        #Check request type
-        if(action == "ADD"):
-            add_new_element_to_store(global_id, entry)
-            return
-
-        if(action == "DELETEorMODIFY"):
-            delete_option = request.forms.get("delete")
-            print(":", type(delete_option), ":")
-            if(int(delete_option) == 0):
-                modify_element_in_store(element_id, entry, True)
-                return
-            if(int(delete_option) == 1):
-                delete_element_from_store(element_id)
-                return
+        # Handle requests
+        if action == 'ADD':
+            # Add the board entry
+            self.add_new_element_to_store(element_id, entry)
+        elif action == 'MODIFY':
+            # Modify the board entry
+            self.modify_element_in_store(element_id, entry)
+        elif action == 'DELETE':
+            # Delete the entry from the board
+            self.delete_element_from_store(element_id)
 
     # ------------------------------------------------------------------------------------------------------
-    # DISTRIBUTED COMMUNICATIONS FUNCTIONS
+    # COMMUNICATION FUNCTIONS
     # ------------------------------------------------------------------------------------------------------
-
-    def contact_vessel(vessel_ip, path, payload=None, req='POST'):
-        # Try to contact another server (vessel) through a POST or GET, once
+    def contact_single_node(self, node_ip, path, payload=None, req='POST'):
+        # Try to contact another server (node) through a POST or GET, once
         success = False
         try:
             if 'POST' in req:
-                res = requests.post(
-                    'http://{}{}'.format(vessel_ip, path), data=payload)
+                res = requests.post('http://{}{}'.format(node_ip, path), data=payload)
             elif 'GET' in req:
-                res = requests.get('http://{}{}'.format(vessel_ip, path))
+                res = requests.get('http://{}{}'.format(node_ip, path))
             else:
-                print 'Non implemented feature!'
+                raise Exception('Non implemented feature!')
+                # print 'Non implemented feature!'
             # result is in res.text or res.json()
             print(res.text)
             if res.status_code == 200:
@@ -194,46 +152,77 @@ try:
             print e
         return success
 
-    def propagate_to_vessels(path, payload=None, req='POST'):
-        global vessel_list, node_id
 
-        for vessel_id, vessel_ip in vessel_list.items():
-            if int(vessel_id) != node_id:  # don't propagate to yourself
-                success = contact_vessel(vessel_ip, path, payload, req)
+    def propagate_to_nodes(self, path, payload=None, req='POST'):
+        # global vessel_list, node_id
+
+        for node_id, node_ip in self.node_list.items():
+            if int(node_id) != self.node_id:  # don't propagate to yourself
+                success = self.contact_single_node(node_ip, path, payload, req)
                 if not success:
-                    print "\n\nCould not contact vessel {}\n\n".format(vessel_id)
+                    print "\n\nCould not contact node {}\n\n".format(self.node_id)
+
 
     # ------------------------------------------------------------------------------------------------------
-    # EXECUTION
+    # BOARD FUNCTIONS
     # ------------------------------------------------------------------------------------------------------
 
-    def main():
-        global vessel_list, node_id, app
-
-        port = 80
-        parser = argparse.ArgumentParser(
-            description='Your own implementation of the distributed blackboard')
-        parser.add_argument('--id', nargs='?', dest='nid',
-                            default=1, type=int, help='This server ID')
-        parser.add_argument('--vessels', nargs='?', dest='nbv', default=1,
-                            type=int, help='The total number of vessels present in the system')
-        args = parser.parse_args()
-        node_id = args.nid
-        vessel_list = dict()
-        # We need to write the other vessels IP, based on the knowledge of their number
-        for i in range(1, args.nbv+1):
-            vessel_list[str(i)] = '10.1.0.{}'.format(str(i))
-
+    def add_new_element_to_store(self, entry_sequence, element):
+        success = False
         try:
-            run(app, host=vessel_list[str(node_id)], port=port)
+            if entry_sequence not in self.board:
+                self.board[entry_sequence] = element
+                success = True
         except Exception as e:
             print e
-    # ------------------------------------------------------------------------------------------------------
-    if __name__ == '__main__':
-        main()
+        return success
+    
+    def modify_element_in_store(self, entry_sequence, modified_element):
+        success = False
+        try:
+            if entry_sequence in self.board:
+                self.board[entry_sequence] = modified_element
+            success = True
+        except Exception as e:
+            print e
+        return success
+
+    def delete_element_from_store(self, entry_sequence):
+        success = False
+        try:
+            # If it does not exist we count it as a successful delete as well
+            if entry_sequence in self.board:
+                del self.board[entry_sequence]
+            success = True
+        except Exception as e:
+            print e
+        return success
 
 
-except Exception as e:
-    traceback.print_exc()
-    while True:
-        time.sleep(60.)
+
+# ------------------------------------------------------------------------------------------------------
+# EXECUTION
+# ------------------------------------------------------------------------------------------------------
+def main():
+
+    parser = argparse.ArgumentParser(description='Your own implementation of the distributed blackboard')
+    parser.add_argument('--id', nargs='?', dest='nid', default=1, type=int, help='This server ID')
+    parser.add_argument('--vessels', nargs='?', dest='nbv', default=1, type=int,
+                        help='The total number of nodes present in the system')
+    args = parser.parse_args()
+    node_id = args.nid
+    node_list = {}
+    # We need to write the other nodes IP, based on the knowledge of their number
+    for i in range(1, args.nbv + 1):
+        node_list[str(i)] = '10.1.0.{}'.format(str(i))
+
+    try:
+        server = Server(host=node_list[str(node_id)], port=80, node_list = node_list, node_id = node_id)
+        server.start()
+
+    except Exception as e:
+        print e
+        traceback.print_exc() 
+# ------------------------------------------------------------------------------------------------------
+if __name__ == '__main__':
+    main()
