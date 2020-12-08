@@ -40,7 +40,7 @@ class Server:
     # GET '/'
     def index(self):
         return template('server/index.tpl', board_title='Node {}'.format(self.node_id),
-                        board_dict=sorted({"0": self.board, }.iteritems()), members_name_string='Socrates, '
+                        board_dict=sorted(self.board.iteritems()), members_name_string='Socrates, '
                                                                                            'Plato, '
                                                                                            'Aristotle')
 
