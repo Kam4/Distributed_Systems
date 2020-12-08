@@ -21,6 +21,12 @@ try:
     # board stores all message on the system
     board = {0: "Welcome to Distributed Systems Course"}
 
+    # local board to add local element into the board.
+    local_board = {}
+
+    # Clock
+    clock = []
+
     #Globa_id for elements so that each element gets a unique ID
     global_id = 1
 
