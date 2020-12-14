@@ -11,6 +11,7 @@ import argparse
 from threading import Thread
 from bottle import Bottle, run, request, template
 import requests
+from operator import itemgetter
 
 class Server:
 	def __init__(self, host, port, node_list, node_id):
@@ -23,7 +24,8 @@ class Server:
 		self.node_id = node_id
 		self.entry_id = 0
 		self.logical_clock = 0
-		self.latest_added = []
+		self.board_history = [] # [[timestamp, action, entry, element_id, process_id], [timestamp, action, entry, element_id, process_id]]
+		self.thread_active = False
 
 	def _route(self):
 		self._app.route('/', method="GET", callback=self.index)
@@ -31,8 +33,6 @@ class Server:
 		self._app.route('/board', method="POST", callback=self.client_add_received)
 		self._app.route('/board/<element_id:int>/', method="POST", callback=self.client_action_received)
 		self._app.route('/propagate/<action>/<element_id:int>', method="POST", callback=self.propagation_received)
-		self._app.route('/clash/<element_id:int>', method="POST", callback=self.clash_called)
-
 
 	def start(self):
 		self._app.run(host=self._host, port=self._port)
@@ -61,9 +61,9 @@ class Server:
 		try:
 			new_entry = request.forms.get('entry')
 			element_id = len(self.board)  # you need to generate a entry number
+			self.increase_logical_timer()
 			self.add_new_element_to_store(element_id, new_entry)
-			self.latest_added.append(self.entry_id)
-
+			self.board_history.append([self.logical_clock, "ADD", new_entry, self.entry_id, self.node_id])
 			thread = Thread(target=self.propagate_to_nodes,
 							args=('/propagate/ADD/' + str(element_id),
 								  {'entry': new_entry, "timestamp": self.logical_clock, 'process_id': self.node_id},
@@ -71,7 +71,7 @@ class Server:
 
 			thread.daemon = True
 			thread.start()
-			self.increase_logical_timer()
+			print(self.board_history)
 			return '<h1>Successfully added entry</h1>'
 		except Exception as e:
 			print e
@@ -90,7 +90,7 @@ class Server:
 			# 0 = modify, 1 = delete
 
 			print "the delete option is ", delete_option
-
+			self.increase_logical_timer()
 			# call either delete or modify
 			if delete_option == '0':
 				self.modify_element_in_store(element_id, entry)
@@ -104,7 +104,7 @@ class Server:
 				raise Exception("Unaccepted delete option")
 
 			print propagate_action
-
+			self.board_history.append([self.logical_clock, propagate_action, entry, element_id, self.node_id])
 			# propage to other nodes
 			thread = Thread(target=self.propagate_to_nodes,
 							args=('/propagate/' + propagate_action + '/' + str(element_id),
@@ -112,7 +112,7 @@ class Server:
 								  'POST'))
 			thread.daemon = True
 			thread.start()
-			self.increase_logical_timer()
+			print(self.board_history)
 			return '<h1>Successfully ' + propagate_action + ' entry</h1>'
 		except Exception as e:
 			print e
@@ -127,7 +127,15 @@ class Server:
 		timestamp = request.forms.get('timestamp')
 		process_id = request.forms.get('process_id')
 		print "the action is", action
-
+		self.increase_logical_timer(timestamp)
+		self.board_history.append([int(timestamp), action, entry, element_id, int(process_id)])
+		if(not self.thread_active):
+			self.thread_active = True
+			thread = Thread(target=self.sort_board,
+					args=())
+			thread.daemon = True
+			thread.start()
+		print(self.board_history)
 		# Handle requests
 		if action == 'ADD':
 			# Add the board entry
@@ -138,20 +146,7 @@ class Server:
 		elif action == 'DELETE':
 			# Delete the entry from the board
 			self.delete_element_from_store(element_id)
-		if int(timestamp) < self.logical_clock:
-			self.handle_clash(entry, element_id, process_id)
-			self.increase_logical_timer(timestamp)
-
-	def clash_called(self, element_id):
-		print("in clash_called")
-		entry = request.forms.get("entry")
-		board_copy = self.board.copy()
-		old_entry = board_copy[int(element_id+1)]
-		board_copy[int(element_id)] = old_entry
-		board_copy[int(element_id+1)] = entry
-		self.board = board_copy.copy()
-		print(self.board, " ay ", board_copy)
-
+		#self.sort_board()
 
 	# ------------------------------------------------------------------------------------------------------
 	# COMMUNICATION FUNCTIONS
@@ -231,18 +226,24 @@ class Server:
 	def increase_logical_timer(self, timestamp=0):
 		default_add = 2
 		self.logical_clock = max(self.logical_clock, int(timestamp)) + default_add
-		#print(self.logical_clock)
+		print("Logical clock: ",self.logical_clock)
 
-	def handle_clash(self, entry, element_id, process_id):
-		if(int(process_id) > self.node_id and int(element_id) in self.latest_added):
-			node_ip = self.node_list[process_id]
-			thread = Thread(target=self.contact_single_node,
-				args=(node_ip, '/clash/' + str(element_id),
-					  {'entry': entry, 'process_id': self.node_id},
-					  'POST'))
-			thread.daemon = True
-			thread.start()
-			return
+	def sort_board(self):
+		time.sleep(10)
+		self.board_history = sorted(self.board_history, key=itemgetter(4), reverse=True)
+		self.board_history = sorted(self.board_history, key=itemgetter(0))
+		element_id = 0
+		increment = 0
+		for i in range(0, len(self.board_history)):
+			if(self.board_history[i][1] == "ADD"):
+				if(element_id == self.board_history[i][3]):
+					increment += 1
+				element_id = self.board_history[i][3]
+				entry = self.board_history[i][2]
+				self.board[element_id + increment] = entry
+			else:
+				increment = 0
+		self.thread_active = False
 
 # ------------------------------------------------------------------------------------------------------
 # EXECUTION
