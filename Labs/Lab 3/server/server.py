@@ -12,6 +12,7 @@ from threading import Thread
 from bottle import Bottle, run, request, template
 import requests
 from operator import itemgetter
+import copy
 
 class Server:
 	def __init__(self, host, port, node_list, node_id):
@@ -25,7 +26,8 @@ class Server:
 		self.entry_id = 0
 		self.logical_clock = 0
 		self.board_add_history = [] # [[timestamp, action, entry, element_id, process_id], [timestamp, action, entry, element_id, process_id]]
-		self.board_editdelete_history = [] # [[timestamp, action, entry, element_id, process_id], [timestamp, action, entry, element_id, process_id]]
+		self.board_editdelete_history = [] # [[timestamp, action, entry, element_id, process_id, old_value], [timestamp, action, entry, element_id, process_id, old_value]]
+		self.board_all_history = []
 		self.thread_active = False
 
 	def _route(self):
@@ -62,14 +64,12 @@ class Server:
 		try:
 			new_entry = request.forms.get('entry')
 			element_id = len(self.board)  # you need to generate a entry number
-			self.increase_logical_timer()
 			self.add_new_element_to_store(element_id, new_entry)
 			self.board_add_history.append([self.logical_clock, "ADD", new_entry, self.entry_id, self.node_id])
 			thread = Thread(target=self.propagate_to_nodes,
 							args=('/propagate/ADD/' + str(element_id),
 								  {'entry': new_entry, "timestamp": self.logical_clock, 'process_id': self.node_id},
 								  'POST'))
-
 			thread.daemon = True
 			thread.start()
 			return '<h1>Successfully added entry</h1>'
@@ -89,8 +89,9 @@ class Server:
 			delete_option = request.forms.get('delete')
 			# 0 = modify, 1 = delete
 
+			old_value = self.board[element_id]
+
 			print "the delete option is ", delete_option
-			self.increase_logical_timer()
 			# call either delete or modify
 			if delete_option == '0':
 				self.modify_element_in_store(element_id, entry)
@@ -104,11 +105,11 @@ class Server:
 				raise Exception("Unaccepted delete option")
 
 			print propagate_action
-			self.board_add_history.append([self.logical_clock, propagate_action, entry, element_id, self.node_id])
+			self.board_editdelete_history.append([self.logical_clock, propagate_action, entry, element_id, self.node_id, old_value])
 			# propage to other nodes
 			thread = Thread(target=self.propagate_to_nodes,
 							args=('/propagate/' + propagate_action + '/' + str(element_id),
-								  {'entry': entry, 'timestamp': self.logical_clock, 'process_id': self.node_id},
+								  {'entry': entry, 'timestamp': self.logical_clock, 'process_id': self.node_id, 'old_value': old_value},
 								  'POST'))
 			thread.daemon = True
 			thread.start()
@@ -140,12 +141,14 @@ class Server:
 			self.add_new_element_to_store(element_id, entry)
 		elif action == 'MODIFY':
 			# Modify the board entry
-			self.board_history.append([int(timestamp), action, entry, element_id, int(process_id)])
-			self.modify_element_in_store(element_id, entry)
+			old_value = request.forms.get('old_value')
+			self.board_editdelete_history.append([int(timestamp), action, entry, element_id, int(process_id), old_value])
+			#self.modify_element_in_store(element_id, entry)
 		elif action == 'DELETE':
 			# Delete the entry from the board
-			self.delete_element_from_store(element_id)
-		#self.sort_board()
+			old_value = request.forms.get('old_value')
+			self.board_editdelete_history.append([int(timestamp), action, entry, element_id, int(process_id), old_value])
+			#self.delete_element_from_store(element_id)
 
 	# ------------------------------------------------------------------------------------------------------
 	# COMMUNICATION FUNCTIONS
@@ -231,18 +234,50 @@ class Server:
 		time.sleep(10)
 		self.board_add_history = sorted(self.board_add_history, key=itemgetter(4), reverse=True)
 		self.board_add_history = sorted(self.board_add_history, key=itemgetter(0))
+		add_list = copy.deepcopy(self.board_add_history)
 		element_id = 0
 		increment = 0
-		for i in range(0, len(self.board_add_history)):
-			if(self.board_add_history[i][1] == "ADD"):
-				if(element_id == self.board_add_history[i][3]):
-					increment += 1
-				element_id = self.board_add_history[i][3]
-				entry = self.board_add_history[i][2]
-				self.board[element_id + increment] = entry
-			else:
-				increment = 0
-		self.board_add_history.clear()
+		for i in range(0, len(add_list)):
+			if(element_id == add_list[i][3]):
+				increment += 1
+			element_id = add_list[i][3]
+			entry = add_list[i][2]
+			self.board[element_id + increment] = entry
+		self.board_all_history += add_list
+		del self.board_add_history[:len(add_list)]
+		print("-- .. ",self.board_add_history)
+		self.apply_modifications_and_deletions()
+
+	def apply_modifications_and_deletions(self):
+		self.board_editdelete_history = sorted(self.board_editdelete_history, key=itemgetter(4), reverse=True)
+		self.board_editdelete_history = sorted(self.board_editdelete_history, key=itemgetter(0))
+		temp_list = []
+		for i in range(0, len(self.board_editdelete_history)-1):
+			for z in range(i+1, len(self.board_editdelete_history)):
+				if(self.board_editdelete_history[i][3] == self.board_editdelete_history[z][3]):
+					if(self.board_editdelete_history[i][1] == "DELETE" and not self.board_editdelete_history[z][1] == "DELETE"):
+						temp_list.append(z)
+					else:
+						temp_list.append(i)
+		for i in reversed(temp_list):
+			self.board_editdelete_history.pop(i)
+		print(".. -- ",self.board_editdelete_history)
+		for item in self.board_editdelete_history:
+			for key, value in self.board.items():
+				if(value == item[5] and item[1] == "MODIFY"):
+					self.modify_element_in_store(key, item[2])
+					break
+				elif(value == item[5] and item[1] == "DELETE"):
+					self.delete_element_from_store(key)
+					break
+				elif(item[1] == "MODIFY"):
+					self.modify_element_in_store(item[3], item[2])
+					break
+				elif(item[1] == "DELETE"):
+					self.delete_element_from_store(item[3])
+					break
+		self.board_all_history += self.board_editdelete_history
+		del self.board_editdelete_history[:]
 		self.thread_active = False
 
 # ------------------------------------------------------------------------------------------------------
@@ -260,11 +295,9 @@ def main():
 	# We need to write the other nodes IP, based on the knowledge of their number
 	for i in range(1, args.nbv + 1):
 		node_list[str(i)] = '10.1.0.{}'.format(str(i))
-
 	try:
 		server = Server(host=node_list[str(node_id)], port=80, node_list = node_list, node_id = node_id)
 		server.start()
-
 	except Exception as e:
 		print e
 		traceback.print_exc() 
