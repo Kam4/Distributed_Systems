@@ -26,6 +26,7 @@ class Server:
 		self.logical_clock = 0
 		self.board_add_history = [] # [[timestamp, action, entry, element_id, process_id], [timestamp, action, entry, element_id, process_id]]
 		self.board_editdelete_history = [] # [[timestamp, action, entry, element_id, process_id], [timestamp, action, entry, element_id, process_id]]
+		self.board_history = []
 		self.thread_active = False
 
 	def _route(self):
