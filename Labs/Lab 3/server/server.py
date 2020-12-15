@@ -24,7 +24,8 @@ class Server:
 		self.node_id = node_id
 		self.entry_id = 0
 		self.logical_clock = 0
-		self.board_history = [] # [[timestamp, action, entry, element_id, process_id], [timestamp, action, entry, element_id, process_id]]
+		self.board_add_history = [] # [[timestamp, action, entry, element_id, process_id], [timestamp, action, entry, element_id, process_id]]
+		self.board_editdelete_history = [] # [[timestamp, action, entry, element_id, process_id], [timestamp, action, entry, element_id, process_id]]
 		self.thread_active = False
 
 	def _route(self):
@@ -63,7 +64,7 @@ class Server:
 			element_id = len(self.board)  # you need to generate a entry number
 			self.increase_logical_timer()
 			self.add_new_element_to_store(element_id, new_entry)
-			self.board_history.append([self.logical_clock, "ADD", new_entry, self.entry_id, self.node_id])
+			self.board_add_history.append([self.logical_clock, "ADD", new_entry, self.entry_id, self.node_id])
 			thread = Thread(target=self.propagate_to_nodes,
 							args=('/propagate/ADD/' + str(element_id),
 								  {'entry': new_entry, "timestamp": self.logical_clock, 'process_id': self.node_id},
@@ -71,7 +72,6 @@ class Server:
 
 			thread.daemon = True
 			thread.start()
-			print(self.board_history)
 			return '<h1>Successfully added entry</h1>'
 		except Exception as e:
 			print e
@@ -104,7 +104,7 @@ class Server:
 				raise Exception("Unaccepted delete option")
 
 			print propagate_action
-			self.board_history.append([self.logical_clock, propagate_action, entry, element_id, self.node_id])
+			self.board_add_history.append([self.logical_clock, propagate_action, entry, element_id, self.node_id])
 			# propage to other nodes
 			thread = Thread(target=self.propagate_to_nodes,
 							args=('/propagate/' + propagate_action + '/' + str(element_id),
@@ -112,7 +112,6 @@ class Server:
 								  'POST'))
 			thread.daemon = True
 			thread.start()
-			print(self.board_history)
 			return '<h1>Successfully ' + propagate_action + ' entry</h1>'
 		except Exception as e:
 			print e
@@ -128,20 +127,20 @@ class Server:
 		process_id = request.forms.get('process_id')
 		print "the action is", action
 		self.increase_logical_timer(timestamp)
-		self.board_history.append([int(timestamp), action, entry, element_id, int(process_id)])
 		if(not self.thread_active):
 			self.thread_active = True
 			thread = Thread(target=self.sort_board,
 					args=())
 			thread.daemon = True
 			thread.start()
-		print(self.board_history)
 		# Handle requests
 		if action == 'ADD':
 			# Add the board entry
+			self.board_add_history.append([int(timestamp), action, entry, element_id, int(process_id)])
 			self.add_new_element_to_store(element_id, entry)
 		elif action == 'MODIFY':
 			# Modify the board entry
+			self.board_history.append([int(timestamp), action, entry, element_id, int(process_id)])
 			self.modify_element_in_store(element_id, entry)
 		elif action == 'DELETE':
 			# Delete the entry from the board
@@ -230,19 +229,20 @@ class Server:
 
 	def sort_board(self):
 		time.sleep(10)
-		self.board_history = sorted(self.board_history, key=itemgetter(4), reverse=True)
-		self.board_history = sorted(self.board_history, key=itemgetter(0))
+		self.board_add_history = sorted(self.board_add_history, key=itemgetter(4), reverse=True)
+		self.board_add_history = sorted(self.board_add_history, key=itemgetter(0))
 		element_id = 0
 		increment = 0
-		for i in range(0, len(self.board_history)):
-			if(self.board_history[i][1] == "ADD"):
-				if(element_id == self.board_history[i][3]):
+		for i in range(0, len(self.board_add_history)):
+			if(self.board_add_history[i][1] == "ADD"):
+				if(element_id == self.board_add_history[i][3]):
 					increment += 1
-				element_id = self.board_history[i][3]
-				entry = self.board_history[i][2]
+				element_id = self.board_add_history[i][3]
+				entry = self.board_add_history[i][2]
 				self.board[element_id + increment] = entry
 			else:
 				increment = 0
+		self.board_add_history.clear()
 		self.thread_active = False
 
 # ------------------------------------------------------------------------------------------------------
