@@ -105,11 +105,11 @@ class Server:
 				raise Exception("Unaccepted delete option")
 
 			print propagate_action
-			self.board_editdelete_history.append([self.logical_clock, propagate_action, entry, element_id, self.node_id, old_value])
+			self.board_editdelete_history.append([self.logical_clock, propagate_action, entry, self.board_add_history[element_id-1][3], self.node_id, self.board_add_history[element_id-1][2]])
 			# propage to other nodes
 			thread = Thread(target=self.propagate_to_nodes,
-							args=('/propagate/' + propagate_action + '/' + str(element_id),
-								  {'entry': entry, 'timestamp': self.logical_clock, 'process_id': self.node_id, 'old_value': old_value},
+							args=('/propagate/' + propagate_action + '/' + str(self.board_add_history[element_id-1][3]),
+								  {'entry': entry, 'timestamp': self.logical_clock, 'process_id': self.node_id, 'old_value': self.board_add_history[element_id-1][2]},
 								  'POST'))
 			thread.daemon = True
 			thread.start()
@@ -130,7 +130,7 @@ class Server:
 		self.increase_logical_timer(timestamp)
 		if(not self.thread_active):
 			self.thread_active = True
-			thread = Thread(target=self.sort_board,
+			thread = Thread(target=self.thread_do_work,
 					args=())
 			thread.daemon = True
 			thread.start()
@@ -230,56 +230,50 @@ class Server:
 		self.logical_clock = max(self.logical_clock, int(timestamp)) + default_add
 		print("Logical clock: ",self.logical_clock)
 
-	def sort_board(self):
+	def thread_do_work(self):
 		time.sleep(10)
+		self.sort_board()
+		print(self.board_add_history, " --------- ")
+		self.apply_modifications_and_deletions()
+		print(self.board_add_history, " ********* ")
+		self.sort_board()
+		self.thread_active = False
+
+	def sort_board(self):
 		self.board_add_history = sorted(self.board_add_history, key=itemgetter(4), reverse=True)
 		self.board_add_history = sorted(self.board_add_history, key=itemgetter(0))
 		add_list = copy.deepcopy(self.board_add_history)
-		element_id = 0
-		increment = 0
-		for i in range(0, len(add_list)):
-			if(element_id == add_list[i][3]):
-				increment += 1
-			element_id = add_list[i][3]
-			entry = add_list[i][2]
-			self.board[element_id + increment] = entry
-		self.board_all_history += add_list
-		del self.board_add_history[:len(add_list)]
-		print("-- .. ",self.board_add_history)
-		self.apply_modifications_and_deletions()
+		updated_board = {}
+		added_items = 1
+		for item in add_list:
+			updated_board[added_items] = item[2]
+			added_items += 1
+		self.board.update(updated_board)
 
 	def apply_modifications_and_deletions(self):
 		self.board_editdelete_history = sorted(self.board_editdelete_history, key=itemgetter(4), reverse=True)
 		self.board_editdelete_history = sorted(self.board_editdelete_history, key=itemgetter(0))
+		edit_list = copy.deepcopy(self.board_editdelete_history)
 		temp_list = []
-		for i in range(0, len(self.board_editdelete_history)-1):
-			for z in range(i+1, len(self.board_editdelete_history)):
-				if(self.board_editdelete_history[i][3] == self.board_editdelete_history[z][3]):
-					if(self.board_editdelete_history[i][1] == "DELETE" and not self.board_editdelete_history[z][1] == "DELETE"):
+		for i in range(0, len(edit_list)-1):
+			for z in range(i+1, len(edit_list)):
+				if(edit_list[i][3] == edit_list[z][3]):
+					if(edit_list[i][1] == "DELETE" and not edit_list[z][1] == "DELETE"):
 						temp_list.append(z)
 					else:
 						temp_list.append(i)
 		for i in reversed(temp_list):
-			self.board_editdelete_history.pop(i)
-		print(".. -- ",self.board_editdelete_history)
-		for item in self.board_editdelete_history:
-			for key, value in self.board.items():
-				if(value == item[5] and item[1] == "MODIFY"):
-					self.modify_element_in_store(key, item[2])
-					break
-				elif(value == item[5] and item[1] == "DELETE"):
-					self.delete_element_from_store(key)
-					break
-				elif(item[1] == "MODIFY"):
-					self.modify_element_in_store(item[3], item[2])
-					break
-				elif(item[1] == "DELETE"):
-					self.delete_element_from_store(item[3])
-					break
-		self.board_all_history += self.board_editdelete_history
-		del self.board_editdelete_history[:]
-		self.thread_active = False
-
+			edit_list.pop(i)
+		for item in edit_list:
+			if(item[1] == "MODIFY"):
+				print("At modify")
+				for i in range(0, len(self.board_add_history)):
+					if(item[3] == self.board_add_history[i][3] and item[5] == self.board_add_history[i][2]):
+						print("it should modify now")
+						self.board_add_history[i][2] = item[2]
+			else:
+				continue
+		del self.board_editdelete_history[:len(edit_list)]
 # ------------------------------------------------------------------------------------------------------
 # EXECUTION
 # ------------------------------------------------------------------------------------------------------
