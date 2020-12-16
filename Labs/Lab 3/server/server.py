@@ -25,8 +25,8 @@ class Server:
 		self.node_id = node_id
 		self.entry_id = 0
 		self.logical_clock = 0
-		self.board_add_history = [] # [[timestamp, action, entry, element_id, process_id], [timestamp, action, entry, element_id, process_id]]
-		self.board_editdelete_history = [] # [[timestamp, action, entry, element_id, process_id, old_value], [timestamp, action, entry, element_id, process_id, old_value]]
+		self.board_add_history = [[-1, "ADD", "Welcome to Distributed Systems Course", 0, -1]] # [[timestamp, action, entry, element_id, creator_id], [timestamp, action, entry, element_id, creator_id]]
+		self.board_editdelete_history = [] # [[timestamp, action, entry, element_id, creator_id, process_id], [timestamp, action, entry, element_id, creator_id, process_id]]
 		self.board_all_history = []
 		self.thread_active = False
 
@@ -68,7 +68,7 @@ class Server:
 			self.board_add_history.append([self.logical_clock, "ADD", new_entry, self.entry_id, self.node_id])
 			thread = Thread(target=self.propagate_to_nodes,
 							args=('/propagate/ADD/' + str(element_id),
-								  {'entry': new_entry, "timestamp": self.logical_clock, 'process_id': self.node_id},
+								  {'entry': new_entry, "timestamp": self.logical_clock, 'creator_id': self.node_id},
 								  'POST'))
 			thread.daemon = True
 			thread.start()
@@ -85,11 +85,9 @@ class Server:
 		try:
 			# Get the entry from the HTTP body
 			entry = request.forms.get('entry')
-
+			#process_id = request.forms.get('process_id')
 			delete_option = request.forms.get('delete')
 			# 0 = modify, 1 = delete
-
-			old_value = self.board[element_id]
 
 			print "the delete option is ", delete_option
 			# call either delete or modify
@@ -105,11 +103,11 @@ class Server:
 				raise Exception("Unaccepted delete option")
 
 			print propagate_action
-			self.board_editdelete_history.append([self.logical_clock, propagate_action, entry, self.board_add_history[element_id-1][3], self.node_id, self.board_add_history[element_id-1][2]])
+			self.board_editdelete_history.append([self.logical_clock, propagate_action, entry, self.board_add_history[element_id][3], self.board_add_history[element_id][4], self.node_id])
 			# propage to other nodes
 			thread = Thread(target=self.propagate_to_nodes,
-							args=('/propagate/' + propagate_action + '/' + str(self.board_add_history[element_id-1][3]),
-								  {'entry': entry, 'timestamp': self.logical_clock, 'process_id': self.node_id, 'old_value': self.board_add_history[element_id-1][2]},
+							args=('/propagate/' + propagate_action + '/' + str(self.board_add_history[element_id][3]),
+								  {'entry': entry, 'timestamp': self.logical_clock, 'creator_id': self.board_add_history[element_id][4], 'process_id': self.node_id},
 								  'POST'))
 			thread.daemon = True
 			thread.start()
@@ -125,6 +123,7 @@ class Server:
 		# get entry from http body
 		entry = request.forms.get('entry')
 		timestamp = request.forms.get('timestamp')
+		creator_id = request.forms.get('creator_id')
 		process_id = request.forms.get('process_id')
 		print "the action is", action
 		self.increase_logical_timer(timestamp)
@@ -137,17 +136,15 @@ class Server:
 		# Handle requests
 		if action == 'ADD':
 			# Add the board entry
-			self.board_add_history.append([int(timestamp), action, entry, element_id, int(process_id)])
+			self.board_add_history.append([int(timestamp), action, entry, element_id, int(creator_id)])
 			self.add_new_element_to_store(element_id, entry)
 		elif action == 'MODIFY':
 			# Modify the board entry
-			old_value = request.forms.get('old_value')
-			self.board_editdelete_history.append([int(timestamp), action, entry, element_id, int(process_id), old_value])
+			self.board_editdelete_history.append([int(timestamp), action, entry, element_id, int(creator_id), int(process_id)])
 			#self.modify_element_in_store(element_id, entry)
 		elif action == 'DELETE':
 			# Delete the entry from the board
-			old_value = request.forms.get('old_value')
-			self.board_editdelete_history.append([int(timestamp), action, entry, element_id, int(process_id), old_value])
+			self.board_editdelete_history.append([int(timestamp), action, entry, element_id, int(creator_id), int(process_id)])
 			#self.delete_element_from_store(element_id)
 
 	# ------------------------------------------------------------------------------------------------------
@@ -192,7 +189,7 @@ class Server:
 			if not propagated_call:
 				self.entry_id += 1
 				entry_sequence = self.entry_id
-			if entry_sequence not in self.board:
+			if entry_sequence not in self.board:         
 				self.board[entry_sequence] = element
 				success = True
 		except Exception as e:
@@ -244,35 +241,47 @@ class Server:
 		self.board_add_history = sorted(self.board_add_history, key=itemgetter(0))
 		add_list = copy.deepcopy(self.board_add_history)
 		updated_board = {}
-		added_items = 1
+		added_items = 0
 		for item in add_list:
 			updated_board[added_items] = item[2]
 			added_items += 1
 		self.board.update(updated_board)
 
 	def apply_modifications_and_deletions(self):
-		self.board_editdelete_history = sorted(self.board_editdelete_history, key=itemgetter(4), reverse=True)
+		self.board_editdelete_history = sorted(self.board_editdelete_history, key=itemgetter(5))
 		self.board_editdelete_history = sorted(self.board_editdelete_history, key=itemgetter(0))
 		edit_list = copy.deepcopy(self.board_editdelete_history)
 		temp_list = []
 		for i in range(0, len(edit_list)-1):
 			for z in range(i+1, len(edit_list)):
-				if(edit_list[i][3] == edit_list[z][3]):
-					if(edit_list[i][1] == "DELETE" and not edit_list[z][1] == "DELETE"):
+				if(edit_list[i][3] == edit_list[z][3] and edit_list[i][4] == edit_list[z][4]):
+					if (edit_list[i][1] == "DELETE" and not edit_list[z][1] == "DELETE"):
 						temp_list.append(z)
+						break
 					else:
 						temp_list.append(i)
+						break
+		print(" ---------- ", edit_list)
 		for i in reversed(temp_list):
 			edit_list.pop(i)
+		print(" ---------- ", edit_list)
 		for item in edit_list:
 			if(item[1] == "MODIFY"):
 				print("At modify")
 				for i in range(0, len(self.board_add_history)):
-					if(item[3] == self.board_add_history[i][3] and item[5] == self.board_add_history[i][2]):
+					if(item[3] == self.board_add_history[i][3] and item[4] == self.board_add_history[i][4]):
 						print("it should modify now")
 						self.board_add_history[i][2] = item[2]
+						break
 			else:
-				continue
+				print("at delete")
+				for i in range(0, len(self.board_add_history)):
+					if(item[3] == self.board_add_history[i][3] and item[4] == self.board_add_history[i][4]):
+						print("it should delete now")
+						del self.board_add_history[i]
+						del self.board[len(self.board)-1]
+						print(" ___ ", self.board)
+						break
 		del self.board_editdelete_history[:len(edit_list)]
 # ------------------------------------------------------------------------------------------------------
 # EXECUTION
