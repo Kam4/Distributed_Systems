@@ -65,10 +65,11 @@ class Server:
 			new_entry = request.forms.get('entry')
 			element_id = len(self.board)  # you need to generate a entry number
 			self.add_new_element_to_store(element_id, new_entry)
+			entry_id = self.entry_id
 			self.board_add_history.append([self.logical_clock, "ADD", new_entry, self.entry_id, self.node_id])
 			thread = Thread(target=self.propagate_to_nodes,
-							args=('/propagate/ADD/' + str(element_id),
-								  {'entry': new_entry, "timestamp": self.logical_clock, 'creator_id': self.node_id},
+							args=('/propagate/ADD/' + str(entry_id),
+								  {'entry': new_entry, "timestamp": self.logical_clock, 'creator_id': self.node_id, "element_id": entry_id},
 								  'POST'))
 			thread.daemon = True
 			thread.start()
@@ -104,13 +105,15 @@ class Server:
 
 			print propagate_action
 			self.board_editdelete_history.append([self.logical_clock, propagate_action, entry, self.board_add_history[element_id][3], self.board_add_history[element_id][4], self.node_id])
+			print("1")
 			# propage to other nodes
 			thread = Thread(target=self.propagate_to_nodes,
 							args=('/propagate/' + propagate_action + '/' + str(self.board_add_history[element_id][3]),
-								  {'entry': entry, 'timestamp': self.logical_clock, 'creator_id': self.board_add_history[element_id][4], 'process_id': self.node_id},
+								  {'entry': entry, 'timestamp': self.logical_clock, 'creator_id': self.board_add_history[element_id][4], 'element_id':str(self.board_add_history[element_id][3]), 'process_id': self.node_id},
 								  'POST'))
 			thread.daemon = True
 			thread.start()
+			print("2")
 			return '<h1>Successfully ' + propagate_action + ' entry</h1>'
 		except Exception as e:
 			print e
@@ -125,6 +128,7 @@ class Server:
 		timestamp = request.forms.get('timestamp')
 		creator_id = request.forms.get('creator_id')
 		process_id = request.forms.get('process_id')
+		ele_id = request.forms.get('element_id')
 		print "the action is", action
 		self.increase_logical_timer(timestamp)
 		if(not self.thread_active):
@@ -136,15 +140,15 @@ class Server:
 		# Handle requests
 		if action == 'ADD':
 			# Add the board entry
-			self.board_add_history.append([int(timestamp), action, entry, element_id, int(creator_id)])
+			self.board_add_history.append([int(timestamp), action, entry, int(ele_id), int(creator_id)])
 			self.add_new_element_to_store(element_id, entry)
 		elif action == 'MODIFY':
 			# Modify the board entry
-			self.board_editdelete_history.append([int(timestamp), action, entry, element_id, int(creator_id), int(process_id)])
+			self.board_editdelete_history.append([int(timestamp), action, entry, int(ele_id), int(creator_id), int(process_id)])
 			#self.modify_element_in_store(element_id, entry)
 		elif action == 'DELETE':
 			# Delete the entry from the board
-			self.board_editdelete_history.append([int(timestamp), action, entry, element_id, int(creator_id), int(process_id)])
+			self.board_editdelete_history.append([int(timestamp), action, entry, int(ele_id), int(creator_id), int(process_id)])
 			#self.delete_element_from_store(element_id)
 
 	# ------------------------------------------------------------------------------------------------------
@@ -245,7 +249,8 @@ class Server:
 		for item in add_list:
 			updated_board[added_items] = item[2]
 			added_items += 1
-		self.board.update(updated_board)
+		#self.board.update(updated_board)
+		self.board = copy.deepcopy(updated_board)
 
 	def apply_modifications_and_deletions(self):
 		self.board_editdelete_history = sorted(self.board_editdelete_history, key=itemgetter(5))
@@ -279,7 +284,7 @@ class Server:
 					if(item[3] == self.board_add_history[i][3] and item[4] == self.board_add_history[i][4]):
 						print("it should delete now")
 						del self.board_add_history[i]
-						del self.board[len(self.board)-1]
+						del self.board[max(self.board.keys())]
 						print(" ___ ", self.board)
 						break
 		del self.board_editdelete_history[:len(edit_list)]
