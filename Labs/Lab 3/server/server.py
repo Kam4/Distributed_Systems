@@ -251,6 +251,8 @@ class Server:
 			added_items += 1
 		#self.board.update(updated_board)
 		self.board = copy.deepcopy(updated_board)
+		print("Last key entry after sort, ",self.board.keys()[-1])
+		self.entry_id = self.board.keys()[-1]
 
 	def apply_modifications_and_deletions(self):
 		self.board_editdelete_history = sorted(self.board_editdelete_history, key=itemgetter(5))
